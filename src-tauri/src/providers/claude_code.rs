@@ -17,10 +17,13 @@ pub struct ClaudeCodeData {
     pub daily_tokens: u64,
     pub daily_cost: f64,
     pub error: Option<String>,
+    pub is_peak_hours: bool,
+    pub peak_status: String,
 }
 
 impl ClaudeCodeData {
     pub fn loading() -> Self {
+        let (is_peak, peak_status) = compute_peak_status();
         Self {
             is_available: false,
             status_line: "Cargando...".to_string(),
@@ -29,10 +32,13 @@ impl ClaudeCodeData {
             daily_tokens: 0,
             daily_cost: 0.0,
             error: None,
+            is_peak_hours: is_peak,
+            peak_status,
         }
     }
 
     fn unavailable(error: impl Into<String>) -> Self {
+        let (is_peak, peak_status) = compute_peak_status();
         Self {
             is_available: false,
             status_line: String::new(),
@@ -41,6 +47,8 @@ impl ClaudeCodeData {
             daily_tokens: 0,
             daily_cost: 0.0,
             error: Some(error.into()),
+            is_peak_hours: is_peak,
+            peak_status,
         }
     }
 }
@@ -97,6 +105,8 @@ pub async fn get_data() -> ClaudeCodeData {
         daily_cost
     );
 
+    let (is_peak_hours, peak_status) = compute_peak_status();
+
     ClaudeCodeData {
         is_available: true,
         status_line,
@@ -105,6 +115,8 @@ pub async fn get_data() -> ClaudeCodeData {
         daily_tokens,
         daily_cost,
         error: None,
+        is_peak_hours,
+        peak_status,
     }
 }
 
@@ -220,6 +232,84 @@ fn read_daily_jsonl(userprofile: &str) -> (u64, f64) {
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
+
+/// Returns the nth weekday (0=Sun..6=Sat) of a given month/year (1-indexed ordinal).
+/// e.g. nth_weekday(2025, 3, 0, 2) → second Sunday of March 2025 (day-of-month).
+fn nth_weekday(year: i32, month: u32, weekday: u32, nth: u32) -> u32 {
+    // Find first occurrence of `weekday` in month
+    // chrono weekday: Mon=1..Sun=7, but we work with 0=Sun..6=Sat mapping below
+    use chrono::Datelike;
+    let first = chrono::NaiveDate::from_ymd_opt(year, month, 1).unwrap();
+    // chrono: Monday=0..Sunday=6 for num_days_from_monday()
+    // We need: Sunday=0, Monday=1 … Saturday=6
+    let first_dow = (first.weekday().num_days_from_sunday()) as u32; // Sun=0
+    let days_until = (7 + weekday - first_dow) % 7;
+    1 + days_until + (nth - 1) * 7
+}
+
+/// Returns true if the UTC timestamp is during PDT (Pacific Daylight Time, UTC-7).
+/// PDT runs from the second Sunday of March at 2:00 AM PST
+/// to the first Sunday of November at 2:00 AM PDT.
+fn is_pdt(utc_now: chrono::DateTime<chrono::Utc>) -> bool {
+    use chrono::Datelike;
+    let year = utc_now.year();
+    let month = utc_now.month();
+
+    if month < 3 || month > 11 {
+        return false; // Jan, Feb, Dec → always PST
+    }
+    if month > 3 && month < 11 {
+        return true; // Apr–Oct → always PDT
+    }
+
+    if month == 3 {
+        // PDT starts: second Sunday of March at 2:00 AM PST (= 10:00 UTC)
+        let start_day = nth_weekday(year, 3, 0, 2);
+        let start_utc_hour = 10u32; // 2 AM PST = UTC-8 → 10:00 UTC
+        let transition = chrono::NaiveDate::from_ymd_opt(year, 3, start_day)
+            .unwrap()
+            .and_hms_opt(start_utc_hour, 0, 0)
+            .unwrap()
+            .and_utc();
+        return utc_now >= transition;
+    }
+
+    // month == 11
+    // PDT ends: first Sunday of November at 2:00 AM PDT (= 09:00 UTC)
+    let end_day = nth_weekday(year, 11, 0, 1);
+    let end_utc_hour = 9u32; // 2 AM PDT = UTC-7 → 09:00 UTC
+    let transition = chrono::NaiveDate::from_ymd_opt(year, 11, end_day)
+        .unwrap()
+        .and_hms_opt(end_utc_hour, 0, 0)
+        .unwrap()
+        .and_utc();
+    utc_now < transition
+}
+
+/// Computes whether we're in Claude Code peak hours (Mon–Fri, 5 AM–11 AM PT)
+/// and returns (is_peak, peak_status_string).
+fn compute_peak_status() -> (bool, String) {
+    use chrono::{Datelike, Timelike};
+    let now_utc = chrono::Utc::now();
+    let offset_hours: i64 = if is_pdt(now_utc) { -7 } else { -8 };
+    let now_pt = now_utc + chrono::Duration::hours(offset_hours);
+
+    let weekday = now_pt.weekday(); // Mon=Monday … Sun=Sunday
+    let is_weekend = matches!(weekday, chrono::Weekday::Sat | chrono::Weekday::Sun);
+    let hour = now_pt.hour(); // 0..23
+
+    if is_weekend {
+        return (false, "Off-Peak (weekend)".to_string());
+    }
+
+    // Peak = 5:00 AM (inclusive) to 11:00 AM (exclusive)
+    let is_peak = hour >= 5 && hour < 11;
+    if is_peak {
+        (true, "Peak".to_string())
+    } else {
+        (false, "Off-Peak".to_string())
+    }
+}
 
 fn model_pricing(model: &str) -> (f64, f64) {
     if model.contains("opus") {

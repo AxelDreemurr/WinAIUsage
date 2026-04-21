@@ -181,10 +181,11 @@ body {
   display: inline-block;
   width: 8px;
   height: 8px;
-  border: 1.5px solid #444;
-  border-top-color: #888;
+  border: 1.5px solid #3a3a3a;
+  border-top-color: #aaa;
   border-radius: 50%;
-  animation: spin 0.7s linear infinite;
+  animation: spin 0.65s linear infinite;
+  flex-shrink: 0;
 }
 
 @keyframes spin {

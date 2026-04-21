@@ -18,6 +18,8 @@ interface ClaudeCodeData {
   daily_tokens: number;
   daily_cost: number;
   error: string | null;
+  is_peak_hours: boolean;
+  peak_status: string;
 }
 
 interface ModelQuota {
@@ -84,20 +86,65 @@ function ProgressBar({ pct, label, resetAt }: { pct: number; label: string; rese
   );
 }
 
+function PeakBadge({ status }: { status: string }) {
+  let bg: string;
+  let color: string;
+  let icon: string;
+
+  if (status === "Peak") {
+    bg = "#3D1F1F";
+    color = "#FF6B6B";
+    icon = "⚡";
+  } else if (status === "Off-Peak (weekend)") {
+    bg = "#1A2A3D";
+    color = "#64B5F6";
+    icon = "✓";
+  } else {
+    bg = "#1A3D1F";
+    color = "#4CAF50";
+    icon = "✓";
+  }
+
+  return (
+    <span
+      style={{
+        background: bg,
+        color,
+        borderRadius: "4px",
+        padding: "2px 7px",
+        fontSize: "11px",
+        fontWeight: 500,
+        marginLeft: "6px",
+        whiteSpace: "nowrap",
+        flexShrink: 0,
+      }}
+    >
+      {icon} {status}
+    </span>
+  );
+}
+
 function CardShell({
   name,
   active,
+  badge,
+  refreshing,
   children,
 }: {
   name: string;
   active: boolean;
+  badge?: React.ReactNode;
+  refreshing?: boolean;
   children: React.ReactNode;
 }) {
   return (
     <div className="provider-card">
       <div className="card-header">
         <span className="provider-name">{name}</span>
-        <span className={`status-dot ${active ? "active" : "inactive"}`} />
+        {badge}
+        {refreshing
+          ? <span className="spinner" style={{ marginLeft: "auto", flexShrink: 0 }} />
+          : <span className={`status-dot ${active ? "active" : "inactive"}`} style={{ marginLeft: "auto" }} />}
       </div>
       {children}
     </div>
@@ -106,9 +153,14 @@ function CardShell({
 
 // ── Provider cards (presentational) ──────────────────────────────────────────
 
-function ClaudeCard({ data }: { data: ClaudeCodeData }) {
+function ClaudeCard({ data, refreshing }: { data: ClaudeCodeData; refreshing: boolean }) {
   return (
-    <CardShell name="Claude Code" active={data.is_available}>
+    <CardShell
+      name="Claude Code"
+      active={data.is_available}
+      badge={<PeakBadge status={data.peak_status} />}
+      refreshing={refreshing}
+    >
       <div className="card-status">{data.status_line || data.error || "No disponible"}</div>
       {data.is_available && data.five_hour && (
         <ProgressBar pct={data.five_hour.utilization} label="Sesión (5h)" resetAt={data.five_hour.resets_at} />
@@ -120,9 +172,9 @@ function ClaudeCard({ data }: { data: ClaudeCodeData }) {
   );
 }
 
-function AntigravityCard({ data }: { data: AntigravityData }) {
+function AntigravityCard({ data, refreshing }: { data: AntigravityData; refreshing: boolean }) {
   return (
-    <CardShell name="Antigravity" active={data.is_available}>
+    <CardShell name="Antigravity" active={data.is_available} refreshing={refreshing}>
       <div className="card-status">{data.status_line || data.error || "No disponible"}</div>
       {data.is_available && data.models.map((m) => (
         <ProgressBar key={m.label} pct={m.percent_used} label={m.label} resetAt={m.reset_time} />
@@ -131,9 +183,9 @@ function AntigravityCard({ data }: { data: AntigravityData }) {
   );
 }
 
-function CodexCard() {
+function CodexCard({ refreshing }: { refreshing: boolean }) {
   return (
-    <CardShell name="Codex" active={false}>
+    <CardShell name="Codex" active={false} refreshing={refreshing}>
       <div className="card-status">Sin sesión activa</div>
     </CardShell>
   );
@@ -147,7 +199,7 @@ function AboutModal({ onClose }: { onClose: () => void }) {
       <div className="modal-card" onClick={(e) => e.stopPropagation()}>
         <button className="modal-close" onClick={onClose}>✕</button>
         <div className="modal-title">WinAIUsage</div>
-        <div className="modal-version">v0.1.0</div>
+        <div className="modal-version">v0.1.1</div>
         <div className="modal-divider" />
         <div className="modal-author">Desarrollado por @AxelDreemurr</div>
         <button
@@ -227,9 +279,9 @@ function App() {
       <div className="popup-body">
         {data ? (
           <>
-            <ClaudeCard data={data.claude_code} />
-            <CodexCard />
-            <AntigravityCard data={data.antigravity} />
+            <ClaudeCard data={data.claude_code} refreshing={refreshing} />
+            <CodexCard refreshing={refreshing} />
+            <AntigravityCard data={data.antigravity} refreshing={refreshing} />
           </>
         ) : (
           <div className="card-status" style={{ padding: "8px 0" }}>Cargando...</div>
@@ -240,7 +292,7 @@ function App() {
 
       <div className="popup-footer">
         <span className="footer-app-name" onClick={() => setShowAbout(true)}>
-          WinAIUsage v0.1.0
+          WinAIUsage v0.1.1
         </span>
         {lastUpdated && (
           <>

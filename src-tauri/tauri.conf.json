@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "winaiusage",
-  "version": "0.1.0",
+  "productName": "WinAIUsage",
+  "version": "0.1.1",
   "identifier": "com.axeldreemurr.winaiusage",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -30,6 +30,7 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "publisher": "Axel Silva Martínez",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

@@ -1,5 +1,9 @@
 use serde::Serialize;
 use std::time::Duration;
+#[cfg(target_os = "windows")]
+use std::os::windows::process::CommandExt;
+
+const CREATE_NO_WINDOW: u32 = 0x08000000;
 
 // ── Public structs ────────────────────────────────────────────────────────────
 
@@ -147,6 +151,7 @@ fn find_ls_process() -> Option<LsInfo> {
             "ProcessId,CommandLine",
             "/format:csv",
         ])
+        .creation_flags(CREATE_NO_WINDOW)
         .output();
 
     if let Ok(out) = wmic {
@@ -168,6 +173,7 @@ fn find_ls_process() -> Option<LsInfo> {
             "-command",
             "Get-WmiObject Win32_Process | Where-Object {$_.Name -like '*language_server*' -and $_.CommandLine -like '*antigravity*'} | Select-Object ProcessId,CommandLine | ConvertTo-Json",
         ])
+        .creation_flags(CREATE_NO_WINDOW)
         .output();
 
     match ps {
@@ -227,7 +233,11 @@ fn parse_ps_json(text: &str) -> Option<LsInfo> {
 // ── Paso 2: netstat ports ─────────────────────────────────────────────────────
 
 fn find_listening_ports(pid: u32) -> Vec<u16> {
-    let out = match std::process::Command::new("netstat").args(["-ano"]).output() {
+    let out = match std::process::Command::new("netstat")
+        .args(["-ano"])
+        .creation_flags(CREATE_NO_WINDOW)
+        .output()
+    {
         Ok(o) => o,
         Err(_) => return vec![],
     };
@@ -334,7 +344,7 @@ fn parse_ls_models(v: &serde_json::Value) -> Vec<ModelQuota> {
         Some(a) => a,
         None => return vec![],
     };
-    arr.iter()
+    let mut models: Vec<ModelQuota> = arr.iter()
         .filter_map(|c| {
             let label = c["label"].as_str()?;
             let remaining = c["quotaInfo"]["remainingFraction"].as_f64().unwrap_or(1.0);
@@ -346,7 +356,9 @@ fn parse_ls_models(v: &serde_json::Value) -> Vec<ModelQuota> {
                 reset_time,
             })
         })
-        .collect()
+        .collect();
+    models.sort_by_key(|m| model_sort_key(&m.label));
+    models
 }
 
 fn decode_wmic(bytes: &[u8]) -> String {
@@ -437,7 +449,7 @@ fn parse_cloud_models(v: &serde_json::Value) -> Vec<ModelQuota> {
         Some(m) => m,
         None => return vec![],
     };
-    map.values()
+    let mut models: Vec<ModelQuota> = map.values()
         .filter_map(|m| {
             let label = m["displayName"].as_str()?;
             if label.is_empty() {
@@ -452,5 +464,17 @@ fn parse_cloud_models(v: &serde_json::Value) -> Vec<ModelQuota> {
                 reset_time,
             })
         })
-        .collect()
+        .collect();
+    models.sort_by_key(|m| model_sort_key(&m.label));
+    models
+}
+
+/// Sort priority: Gemini=0, Claude=1, GPT-OSS=2, everything else=3.
+/// Within the same group, the original relative order is preserved (stable sort).
+fn model_sort_key(label: &str) -> u8 {
+    let lower = label.to_lowercase();
+    if lower.contains("gemini")     { 0 }
+    else if lower.contains("claude") { 1 }
+    else if lower.contains("gpt")    { 2 }
+    else                             { 3 }
 }
