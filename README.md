@@ -7,6 +7,9 @@ A modern Windows system tray app that monitors your AI tool usage in real time â
 <p align="center">
   <img src="assets/screenshot.png" alt="WinAIUsage popup screenshot" width="380" />
 </p>
+<p align="center">
+  <img src="assets/notifications.png" alt="WinAIUsage push notification screenshot" width="380" />
+</p>
 
 ---
 
