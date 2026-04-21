@@ -139,6 +139,28 @@ function CodexCard() {
   );
 }
 
+// ── About modal ───────────────────────────────────────────────────────────────
+
+function AboutModal({ onClose }: { onClose: () => void }) {
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal-card" onClick={(e) => e.stopPropagation()}>
+        <button className="modal-close" onClick={onClose}>✕</button>
+        <div className="modal-title">WinAIUsage</div>
+        <div className="modal-version">v0.1.0</div>
+        <div className="modal-divider" />
+        <div className="modal-author">Desarrollado por @AxelDreemurr</div>
+        <button
+          className="modal-btn-link"
+          onClick={() => invoke("open_url", { url: "https://axeldreemurr.cl" })}
+        >
+          Visitar sitio web
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // ── App ───────────────────────────────────────────────────────────────────────
 
 function App() {
@@ -146,6 +168,7 @@ function App() {
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [, setTick] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
+  const [showAbout, setShowAbout] = useState(false);
   const unlistenRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
@@ -213,11 +236,19 @@ function App() {
         )}
       </div>
 
-      {lastUpdated && (
-        <div className="popup-footer">
-          Actualizado {formatLastUpdated(lastUpdated)}
-        </div>
-      )}
+      {showAbout && <AboutModal onClose={() => setShowAbout(false)} />}
+
+      <div className="popup-footer">
+        <span className="footer-app-name" onClick={() => setShowAbout(true)}>
+          WinAIUsage v0.1.0
+        </span>
+        {lastUpdated && (
+          <>
+            <span className="footer-sep"> · </span>
+            <span>Actualizado {formatLastUpdated(lastUpdated)}</span>
+          </>
+        )}
+      </div>
     </div>
   );
 }

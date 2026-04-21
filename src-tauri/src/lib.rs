@@ -30,6 +30,11 @@ pub struct UsageState(pub Arc<Mutex<Option<AllUsageData>>>);
 // ── Commands ──────────────────────────────────────────────────────────────────
 
 #[tauri::command]
+async fn open_url(url: String) {
+    let _ = open::that(url);
+}
+
+#[tauri::command]
 fn hide_window(window: tauri::WebviewWindow) {
     let _ = window.hide();
 }
@@ -67,7 +72,7 @@ fn position_window_above_tray(window: &tauri::WebviewWindow) {
         let wa = monitor.work_area();
         let win_size = window
             .outer_size()
-            .unwrap_or(tauri::PhysicalSize::new(360, 400));
+            .unwrap_or(tauri::PhysicalSize::new(380, 650));
         let x = wa.position.x + wa.size.width as i32 - win_size.width as i32 - 12;
         let y = wa.position.y + wa.size.height as i32 - win_size.height as i32 - 8;
         let _ = window.set_position(tauri::PhysicalPosition::new(x, y));
@@ -91,7 +96,7 @@ pub fn run() {
     tauri::Builder::default()
         .manage(UsageState(Arc::new(Mutex::new(None))))
         .plugin(tauri_plugin_opener::init())
-        .invoke_handler(tauri::generate_handler![hide_window, get_all_usage_data, refresh_now])
+        .invoke_handler(tauri::generate_handler![hide_window, get_all_usage_data, refresh_now, open_url])
         .setup(|app| {
             // ── Background polling ────────────────────────────────────────────
             let poll_app = app.handle().clone();

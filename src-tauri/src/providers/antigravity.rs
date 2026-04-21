@@ -31,6 +31,16 @@ impl AntigravityData {
         }
     }
 
+    fn not_running() -> Self {
+        Self {
+            is_available: false,
+            plan_name: String::new(),
+            models: vec![],
+            status_line: "Antigravity no está corriendo".to_string(),
+            error: None,
+        }
+    }
+
     fn unavailable(error: impl Into<String>) -> Self {
         Self {
             is_available: false,
@@ -64,13 +74,29 @@ pub async fn get_data() -> AntigravityData {
     if let Some(data) = try_cloud_api().await {
         return data;
     }
-    AntigravityData::unavailable("Inicia Antigravity y vuelve a intentar")
+    AntigravityData::not_running()
 }
 
 // ── Strategy 1: Language Server ───────────────────────────────────────────────
 
+struct LsInfo {
+    pid: u32,
+    csrf_token: String,
+    extension_server_port: Option<u16>,
+}
+
 async fn try_language_server() -> Option<AntigravityData> {
-    let (port, csrf) = find_ls_info()?;
+    let info = find_ls_process()?;
+
+    eprintln!(
+        "[antigravity] LS found — PID={} csrf={}... ext_port={:?}",
+        info.pid,
+        &info.csrf_token[..info.csrf_token.len().min(8)],
+        info.extension_server_port
+    );
+
+    let ports = find_listening_ports(info.pid);
+    eprintln!("[antigravity] Listening ports for PID {}: {:?}", info.pid, ports);
 
     let client = reqwest::Client::builder()
         .danger_accept_invalid_certs(true)
@@ -78,28 +104,193 @@ async fn try_language_server() -> Option<AntigravityData> {
         .build()
         .ok()?;
 
-    let base = format!("http://127.0.0.1:{}", port);
+    // Paso 3: probe HTTPS on every netstat port
+    let working = probe_ports(&client, &ports, "https", &info.csrf_token).await;
 
-    // Verify port with GetUnleashData
-    let probe_ok = client
-        .post(format!(
-            "{}/exa.language_server_pb.LanguageServerService/GetUnleashData",
-            base
-        ))
-        .header("Content-Type", "application/json")
-        .header("Connect-Protocol-Version", "1")
-        .header("x-codeium-csrf-token", &csrf)
-        .body("{}")
-        .send()
-        .await
-        .map(|r| r.status().is_success())
-        .unwrap_or(false);
+    // Fallback: HTTP on --extension_server_port from CommandLine
+    let working = if working.is_none() {
+        if let Some(ext) = info.extension_server_port {
+            eprintln!("[antigravity] HTTPS failed — retrying HTTP on port {}", ext);
+            probe_ports(&client, &[ext], "http", &info.csrf_token).await
+        } else {
+            None
+        }
+    } else {
+        working
+    };
 
-    if !probe_ok {
-        return None;
+    let (scheme, port) = match working {
+        Some(p) => p,
+        None => {
+            eprintln!("[antigravity] No working port found");
+            return Some(AntigravityData::unavailable(
+                "Language server sin puerto disponible",
+            ));
+        }
+    };
+
+    eprintln!("[antigravity] Calling GetUserStatus on {}://127.0.0.1:{}", scheme, port);
+    call_get_user_status(&client, &scheme, port, &info.csrf_token).await
+}
+
+// ── Paso 1: find process ──────────────────────────────────────────────────────
+
+fn find_ls_process() -> Option<LsInfo> {
+    eprintln!("[antigravity] Running wmic to find language_server process...");
+
+    let wmic = std::process::Command::new("wmic")
+        .args([
+            "process",
+            "where",
+            "name like '%language_server%'",
+            "get",
+            "ProcessId,CommandLine",
+            "/format:csv",
+        ])
+        .output();
+
+    if let Ok(out) = wmic {
+        let text = decode_wmic(&out.stdout);
+        eprintln!(
+            "[antigravity] wmic output ({} bytes): {}",
+            text.len(),
+            &text[..text.len().min(300)]
+        );
+        if let Some(info) = parse_wmic_csv(&text) {
+            return Some(info);
+        }
     }
 
-    // GetUserStatus
+    // PowerShell fallback
+    eprintln!("[antigravity] wmic found nothing — trying PowerShell fallback...");
+    let ps = std::process::Command::new("powershell")
+        .args([
+            "-command",
+            "Get-WmiObject Win32_Process | Where-Object {$_.Name -like '*language_server*' -and $_.CommandLine -like '*antigravity*'} | Select-Object ProcessId,CommandLine | ConvertTo-Json",
+        ])
+        .output();
+
+    match ps {
+        Ok(out) => {
+            let text = String::from_utf8_lossy(&out.stdout).into_owned();
+            eprintln!(
+                "[antigravity] PowerShell output: {}",
+                &text[..text.len().min(300)]
+            );
+            parse_ps_json(&text)
+        }
+        Err(e) => {
+            eprintln!("[antigravity] PowerShell also failed: {}", e);
+            None
+        }
+    }
+}
+
+fn parse_wmic_csv(text: &str) -> Option<LsInfo> {
+    for line in text.lines() {
+        let lower = line.to_lowercase();
+        if !lower.contains("antigravity") {
+            continue;
+        }
+        eprintln!(
+            "[antigravity] Matching wmic line: {}",
+            &line[..line.len().min(300)]
+        );
+        let pid = extract_pid(line)?;
+        let csrf = extract_arg(line, "--csrf_token").unwrap_or_default();
+        let ext_port = extract_arg(line, "--extension_server_port")
+            .and_then(|s| s.trim().parse().ok());
+        return Some(LsInfo { pid, csrf_token: csrf, extension_server_port: ext_port });
+    }
+    None
+}
+
+fn parse_ps_json(text: &str) -> Option<LsInfo> {
+    let v: serde_json::Value = serde_json::from_str(text.trim()).ok()?;
+
+    // ConvertTo-Json outputs array when multiple results, object for single
+    let item = if v.is_array() {
+        v.as_array()?.first()?.clone()
+    } else {
+        v
+    };
+
+    let cmd = item["CommandLine"].as_str().unwrap_or("");
+    let pid = item["ProcessId"].as_u64()? as u32;
+    let csrf = extract_arg(cmd, "--csrf_token").unwrap_or_default();
+    let ext_port = extract_arg(cmd, "--extension_server_port")
+        .and_then(|s| s.trim().parse().ok());
+
+    Some(LsInfo { pid, csrf_token: csrf, extension_server_port: ext_port })
+}
+
+// ── Paso 2: netstat ports ─────────────────────────────────────────────────────
+
+fn find_listening_ports(pid: u32) -> Vec<u16> {
+    let out = match std::process::Command::new("netstat").args(["-ano"]).output() {
+        Ok(o) => o,
+        Err(_) => return vec![],
+    };
+    let text = String::from_utf8_lossy(&out.stdout);
+    let pid_str = pid.to_string();
+
+    text.lines()
+        .filter(|l| {
+            l.contains("LISTENING") && l.split_whitespace().last() == Some(pid_str.as_str())
+        })
+        .filter_map(|l| {
+            // Local address is 2nd token: "0.0.0.0:PORT" or "127.0.0.1:PORT" or "[::]:PORT"
+            let local = l.split_whitespace().nth(1)?;
+            local.rsplit(':').next()?.parse().ok()
+        })
+        .collect()
+}
+
+// ── Paso 3: probe ports ───────────────────────────────────────────────────────
+
+async fn probe_ports(
+    client: &reqwest::Client,
+    ports: &[u16],
+    scheme: &str,
+    csrf: &str,
+) -> Option<(String, u16)> {
+    for &port in ports {
+        let url = format!(
+            "{}://127.0.0.1:{}/exa.language_server_pb.LanguageServerService/GetUnleashData",
+            scheme, port
+        );
+        eprintln!("[antigravity] Probing {}", url);
+        let ok = client
+            .post(&url)
+            .header("Content-Type", "application/json")
+            .header("Connect-Protocol-Version", "1")
+            .header("x-codeium-csrf-token", csrf)
+            .body("{}")
+            .send()
+            .await
+            .map(|r| r.status().is_success())
+            .unwrap_or(false);
+
+        if ok {
+            eprintln!("[antigravity] Port {} ({}) OK", port, scheme);
+            return Some((scheme.to_string(), port));
+        }
+    }
+    None
+}
+
+// ── Paso 4: GetUserStatus ─────────────────────────────────────────────────────
+
+async fn call_get_user_status(
+    client: &reqwest::Client,
+    scheme: &str,
+    port: u16,
+    csrf: &str,
+) -> Option<AntigravityData> {
+    let url = format!(
+        "{}://127.0.0.1:{}/exa.language_server_pb.LanguageServerService/GetUserStatus",
+        scheme, port
+    );
     let body = serde_json::json!({
         "metadata": {
             "ideName": "antigravity",
@@ -110,23 +301,22 @@ async fn try_language_server() -> Option<AntigravityData> {
     });
 
     let resp = client
-        .post(format!(
-            "{}/exa.language_server_pb.LanguageServerService/GetUserStatus",
-            base
-        ))
+        .post(&url)
         .header("Content-Type", "application/json")
         .header("Connect-Protocol-Version", "1")
-        .header("x-codeium-csrf-token", &csrf)
+        .header("x-codeium-csrf-token", csrf)
         .json(&body)
         .send()
         .await
         .ok()?;
 
     if !resp.status().is_success() {
+        eprintln!("[antigravity] GetUserStatus returned {}", resp.status());
         return None;
     }
 
     let v: serde_json::Value = resp.json().await.ok()?;
+    eprintln!("[antigravity] GetUserStatus response keys: {:?}", v.as_object().map(|m| m.keys().collect::<Vec<_>>()));
 
     let plan = v["userStatus"]["planStatus"]["planInfo"]["planName"]
         .as_str()
@@ -137,38 +327,26 @@ async fn try_language_server() -> Option<AntigravityData> {
     Some(AntigravityData::from_models(plan, models))
 }
 
-fn find_ls_info() -> Option<(u16, String)> {
-    let output = std::process::Command::new("wmic")
-        .args(["process", "get", "CommandLine,ProcessId", "/format:csv"])
-        .output()
-        .ok()?;
+// ── Parse helpers ─────────────────────────────────────────────────────────────
 
-    let text = decode_wmic(&output.stdout);
-
-    for line in text.lines() {
-        let lower = line.to_lowercase();
-        if lower.contains("antigravity")
-            && (lower.contains("language_server") || lower.contains("codeium"))
-        {
-            // Try extracting port and csrf from args
-            if let (Some(port_s), Some(csrf)) = (
-                extract_arg(line, "--extension_server_port"),
-                extract_arg(line, "--csrf_token"),
-            ) {
-                if let Ok(port) = port_s.parse::<u16>() {
-                    return Some((port, csrf));
-                }
-            }
-
-            // Fallback: find listening port via netstat + PID
-            if let Some(pid) = extract_pid(line) {
-                if let Some(&port) = find_listening_ports(pid).first() {
-                    return Some((port, String::new()));
-                }
-            }
-        }
-    }
-    None
+fn parse_ls_models(v: &serde_json::Value) -> Vec<ModelQuota> {
+    let arr = match v["userStatus"]["cascadeModelConfigData"]["clientModelConfigs"].as_array() {
+        Some(a) => a,
+        None => return vec![],
+    };
+    arr.iter()
+        .filter_map(|c| {
+            let label = c["label"].as_str()?;
+            let remaining = c["quotaInfo"]["remainingFraction"].as_f64().unwrap_or(1.0);
+            let reset_time = c["quotaInfo"]["resetTime"].as_str().unwrap_or("").to_string();
+            Some(ModelQuota {
+                label: label.to_string(),
+                remaining_fraction: remaining,
+                percent_used: (1.0 - remaining) * 100.0,
+                reset_time,
+            })
+        })
+        .collect()
 }
 
 fn decode_wmic(bytes: &[u8]) -> String {
@@ -195,48 +373,9 @@ fn extract_arg(line: &str, flag: &str) -> Option<String> {
 }
 
 fn extract_pid(line: &str) -> Option<u32> {
-    // ProcessId is the last comma-separated field in WMIC CSV
+    // ProcessId = last comma-separated field in WMIC CSV
     let last = line.rfind(',')?;
     line[last + 1..].trim().parse().ok()
-}
-
-fn find_listening_ports(pid: u32) -> Vec<u16> {
-    let output = match std::process::Command::new("netstat").args(["-ano"]).output() {
-        Ok(o) => o,
-        Err(_) => return vec![],
-    };
-    let text = String::from_utf8_lossy(&output.stdout);
-    let pid_str = pid.to_string();
-
-    text.lines()
-        .filter(|l| {
-            l.contains("LISTENING") && l.split_whitespace().last() == Some(pid_str.as_str())
-        })
-        .filter_map(|l| {
-            let local = l.split_whitespace().nth(1)?;
-            local.rsplit(':').next()?.parse().ok()
-        })
-        .collect()
-}
-
-fn parse_ls_models(v: &serde_json::Value) -> Vec<ModelQuota> {
-    let arr = match v["userStatus"]["cascadeModelConfigData"]["clientModelConfigs"].as_array() {
-        Some(a) => a,
-        None => return vec![],
-    };
-    arr.iter()
-        .filter_map(|c| {
-            let label = c["label"].as_str()?;
-            let remaining = c["quotaInfo"]["remainingFraction"].as_f64().unwrap_or(1.0);
-            let reset_time = c["quotaInfo"]["resetTime"].as_str().unwrap_or("").to_string();
-            Some(ModelQuota {
-                label: label.to_string(),
-                remaining_fraction: remaining,
-                percent_used: (1.0 - remaining) * 100.0,
-                reset_time,
-            })
-        })
-        .collect()
 }
 
 // ── Strategy 2: Cloud Code API ────────────────────────────────────────────────

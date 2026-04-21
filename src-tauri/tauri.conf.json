@@ -14,8 +14,8 @@
       {
         "label": "main",
         "title": "WinAIUsage",
-        "width": 360,
-        "height": 400,
+        "width": 380,
+        "height": 650,
         "visible": false,
         "decorations": false,
         "resizable": false,
