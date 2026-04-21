@@ -1,5 +1,7 @@
 mod providers;
 
+use std::collections::HashSet;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tauri::{
@@ -26,6 +28,18 @@ impl AllUsageData {
 }
 
 pub struct UsageState(pub Arc<Mutex<Option<AllUsageData>>>);
+pub struct AlertedSet(pub Arc<Mutex<HashSet<String>>>);
+
+pub static LANG_ES: AtomicBool = AtomicBool::new(true);
+pub static IS_PINNED: AtomicBool = AtomicBool::new(false);
+
+pub fn is_es() -> bool {
+    LANG_ES.load(Ordering::Relaxed)
+}
+
+pub fn t<'a>(es: &'a str, en: &'a str) -> &'a str {
+    if is_es() { es } else { en }
+}
 
 // ── Commands ──────────────────────────────────────────────────────────────────
 
@@ -35,22 +49,44 @@ async fn open_url(url: String) {
 }
 
 #[tauri::command]
+fn get_lang() -> String {
+    if is_es() { "es".to_string() } else { "en".to_string() }
+}
+
+#[tauri::command]
+fn toggle_pin(window: tauri::WebviewWindow) -> bool {
+    let new_val = !IS_PINNED.load(Ordering::Relaxed);
+    IS_PINNED.store(new_val, Ordering::Relaxed);
+    let _ = window.set_always_on_top(new_val);
+    new_val
+}
+
+#[tauri::command]
 fn hide_window(window: tauri::WebviewWindow) {
     let _ = window.hide();
 }
 
 #[tauri::command]
 async fn get_all_usage_data(state: tauri::State<'_, UsageState>) -> Result<AllUsageData, ()> {
-    Ok(state.0.lock().unwrap().clone().unwrap_or_else(AllUsageData::loading))
+    Ok(state
+        .0
+        .lock()
+        .unwrap()
+        .clone()
+        .unwrap_or_else(AllUsageData::loading))
 }
 
 #[tauri::command]
-async fn refresh_now(app_handle: tauri::AppHandle, state: tauri::State<'_, UsageState>) -> Result<(), ()> {
+async fn refresh_now(
+    app_handle: tauri::AppHandle,
+    state: tauri::State<'_, UsageState>,
+) -> Result<(), ()> {
     let payload = fetch_all().await;
     {
         let mut g = state.0.lock().unwrap();
         *g = Some(payload.clone());
     }
+    check_and_notify(&app_handle, &payload);
     let _ = app_handle.emit("usage-updated", payload);
     Ok(())
 }
@@ -62,7 +98,62 @@ async fn fetch_all() -> AllUsageData {
         providers::claude_code::get_data(),
         providers::antigravity::get_data(),
     );
-    AllUsageData { claude_code: claude, antigravity }
+    AllUsageData {
+        claude_code: claude,
+        antigravity,
+    }
+}
+
+// ── Notifications ─────────────────────────────────────────────────────────────
+
+fn check_and_notify(app: &tauri::AppHandle, data: &AllUsageData) {
+    let alerted = app.state::<AlertedSet>().0.clone();
+    let thresholds = [(80.0_f64, "80%"), (99.0_f64, "99%")];
+
+    if let Some(p) = &data.claude_code.five_hour {
+        fire_if_needed(app, &alerted, "claude:5h", p.utilization, &thresholds, t("Claude Code · Sesión (5h)", "Claude Code · Session (5h)"));
+    }
+    if let Some(p) = &data.claude_code.seven_day {
+        fire_if_needed(app, &alerted, "claude:7d", p.utilization, &thresholds, t("Claude Code · Semana", "Claude Code · Weekly"));
+    }
+    for m in &data.antigravity.models {
+        let key_prefix = format!("antigravity:{}", m.label);
+        fire_if_needed(app, &alerted, &key_prefix, m.percent_used, &thresholds, &format!("Antigravity · {}", m.label));
+    }
+}
+
+fn fire_if_needed(
+    app: &tauri::AppHandle,
+    alerted: &Arc<Mutex<HashSet<String>>>,
+    key_prefix: &str,
+    pct: f64,
+    thresholds: &[(f64, &str)],
+    label: &str,
+) {
+    use tauri_plugin_notification::NotificationExt;
+    let mut set = alerted.lock().unwrap();
+    for (threshold, threshold_label) in thresholds {
+        if pct >= *threshold {
+            let key = format!("{}:{}", key_prefix, threshold_label);
+            if !set.contains(&key) {
+                let body = if *threshold >= 99.0 {
+                    t("Límite de uso alcanzado", "Usage limit reached").to_string()
+                } else {
+                    if is_es() {
+                        format!("{:.0}% de cuota utilizada", pct)
+                    } else {
+                        format!("{:.0}% quota used", pct)
+                    }
+                };
+                let _ = app.notification()
+                    .builder()
+                    .title(&format!("⚠️ {}", label))
+                    .body(&body)
+                    .show();
+                set.insert(key);
+            }
+        }
+    }
 }
 
 // ── Window positioning ────────────────────────────────────────────────────────
@@ -94,10 +185,22 @@ fn toggle_window(window: &tauri::WebviewWindow) {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_notification::init())
         .manage(UsageState(Arc::new(Mutex::new(None))))
+        .manage(AlertedSet(Arc::new(Mutex::new(HashSet::new()))))
         .plugin(tauri_plugin_opener::init())
-        .invoke_handler(tauri::generate_handler![hide_window, get_all_usage_data, refresh_now, open_url])
+        .invoke_handler(tauri::generate_handler![
+            hide_window,
+            get_all_usage_data,
+            refresh_now,
+            open_url,
+            get_lang,
+            toggle_pin
+        ])
         .setup(|app| {
+            let locale = sys_locale::get_locale().unwrap_or_else(|| "en-US".to_string());
+            LANG_ES.store(locale.starts_with("es"), Ordering::Relaxed);
+
             // ── Background polling ────────────────────────────────────────────
             let poll_app = app.handle().clone();
             let poll_state = app.state::<UsageState>().0.clone();
@@ -109,6 +212,7 @@ pub fn run() {
                         let mut g = poll_state.lock().unwrap();
                         *g = Some(payload.clone());
                     }
+                    check_and_notify(&poll_app, &payload);
                     let _ = poll_app.emit("usage-updated", payload);
                     tokio::time::sleep(Duration::from_secs(300)).await;
                 }
@@ -118,8 +222,8 @@ pub fn run() {
             let focus_lost_at: Arc<Mutex<Option<Instant>>> = Arc::new(Mutex::new(None));
             let focus_lost_at_tray = focus_lost_at.clone();
 
-            let show_item = MenuItem::with_id(app, "show", "Mostrar", true, None::<&str>)?;
-            let quit_item = MenuItem::with_id(app, "quit", "Salir", true, None::<&str>)?;
+            let show_item = MenuItem::with_id(app, "show", t("Mostrar", "Show"), true, None::<&str>)?;
+            let quit_item = MenuItem::with_id(app, "quit", t("Salir", "Quit"), true, None::<&str>)?;
             let menu = Menu::with_items(app, &[&show_item, &quit_item])?;
 
             let _tray = TrayIconBuilder::new()
@@ -166,7 +270,9 @@ pub fn run() {
             main_window.on_window_event(move |event| {
                 if let tauri::WindowEvent::Focused(false) = event {
                     *focus_lost_at.lock().unwrap() = Some(Instant::now());
-                    let _ = win_clone.hide();
+                    if !IS_PINNED.load(Ordering::Relaxed) {
+                        let _ = win_clone.hide();
+                    }
                 }
             });
 

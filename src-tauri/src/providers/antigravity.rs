@@ -1,7 +1,7 @@
 use serde::Serialize;
-use std::time::Duration;
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
+use std::time::Duration;
 
 const CREATE_NO_WINDOW: u32 = 0x08000000;
 
@@ -30,7 +30,7 @@ impl AntigravityData {
             is_available: false,
             plan_name: String::new(),
             models: vec![],
-            status_line: "Cargando...".to_string(),
+            status_line: crate::t("Cargando...", "Loading...").to_string(),
             error: None,
         }
     }
@@ -40,7 +40,7 @@ impl AntigravityData {
             is_available: false,
             plan_name: String::new(),
             models: vec![],
-            status_line: "Antigravity no está corriendo".to_string(),
+            status_line: crate::t("Antigravity no está corriendo", "Antigravity is not running").to_string(),
             error: None,
         }
     }
@@ -58,7 +58,11 @@ impl AntigravityData {
     fn from_models(plan: impl Into<String>, models: Vec<ModelQuota>) -> Self {
         let plan = plan.into();
         let n = models.iter().filter(|m| m.remaining_fraction > 0.0).count();
-        let status_line = format!("{} · {} modelos disponibles", plan, n);
+        let status_line = if crate::is_es() {
+            format!("{} · {} modelos disponibles", plan, n)
+        } else {
+            format!("{} · {} models available", plan, n)
+        };
         Self {
             is_available: true,
             plan_name: plan,
@@ -100,7 +104,10 @@ async fn try_language_server() -> Option<AntigravityData> {
     );
 
     let ports = find_listening_ports(info.pid);
-    eprintln!("[antigravity] Listening ports for PID {}: {:?}", info.pid, ports);
+    eprintln!(
+        "[antigravity] Listening ports for PID {}: {:?}",
+        info.pid, ports
+    );
 
     let client = reqwest::Client::builder()
         .danger_accept_invalid_certs(true)
@@ -128,12 +135,15 @@ async fn try_language_server() -> Option<AntigravityData> {
         None => {
             eprintln!("[antigravity] No working port found");
             return Some(AntigravityData::unavailable(
-                "Language server sin puerto disponible",
+                crate::t("Language server sin puerto disponible", "Language server with no port available"),
             ));
         }
     };
 
-    eprintln!("[antigravity] Calling GetUserStatus on {}://127.0.0.1:{}", scheme, port);
+    eprintln!(
+        "[antigravity] Calling GetUserStatus on {}://127.0.0.1:{}",
+        scheme, port
+    );
     call_get_user_status(&client, &scheme, port, &info.csrf_token).await
 }
 
@@ -204,9 +214,13 @@ fn parse_wmic_csv(text: &str) -> Option<LsInfo> {
         );
         let pid = extract_pid(line)?;
         let csrf = extract_arg(line, "--csrf_token").unwrap_or_default();
-        let ext_port = extract_arg(line, "--extension_server_port")
-            .and_then(|s| s.trim().parse().ok());
-        return Some(LsInfo { pid, csrf_token: csrf, extension_server_port: ext_port });
+        let ext_port =
+            extract_arg(line, "--extension_server_port").and_then(|s| s.trim().parse().ok());
+        return Some(LsInfo {
+            pid,
+            csrf_token: csrf,
+            extension_server_port: ext_port,
+        });
     }
     None
 }
@@ -224,10 +238,13 @@ fn parse_ps_json(text: &str) -> Option<LsInfo> {
     let cmd = item["CommandLine"].as_str().unwrap_or("");
     let pid = item["ProcessId"].as_u64()? as u32;
     let csrf = extract_arg(cmd, "--csrf_token").unwrap_or_default();
-    let ext_port = extract_arg(cmd, "--extension_server_port")
-        .and_then(|s| s.trim().parse().ok());
+    let ext_port = extract_arg(cmd, "--extension_server_port").and_then(|s| s.trim().parse().ok());
 
-    Some(LsInfo { pid, csrf_token: csrf, extension_server_port: ext_port })
+    Some(LsInfo {
+        pid,
+        csrf_token: csrf,
+        extension_server_port: ext_port,
+    })
 }
 
 // ── Paso 2: netstat ports ─────────────────────────────────────────────────────
@@ -326,7 +343,10 @@ async fn call_get_user_status(
     }
 
     let v: serde_json::Value = resp.json().await.ok()?;
-    eprintln!("[antigravity] GetUserStatus response keys: {:?}", v.as_object().map(|m| m.keys().collect::<Vec<_>>()));
+    eprintln!(
+        "[antigravity] GetUserStatus response keys: {:?}",
+        v.as_object().map(|m| m.keys().collect::<Vec<_>>())
+    );
 
     let plan = v["userStatus"]["planStatus"]["planInfo"]["planName"]
         .as_str()
@@ -344,11 +364,15 @@ fn parse_ls_models(v: &serde_json::Value) -> Vec<ModelQuota> {
         Some(a) => a,
         None => return vec![],
     };
-    let mut models: Vec<ModelQuota> = arr.iter()
+    let mut models: Vec<ModelQuota> = arr
+        .iter()
         .filter_map(|c| {
             let label = c["label"].as_str()?;
             let remaining = c["quotaInfo"]["remainingFraction"].as_f64().unwrap_or(1.0);
-            let reset_time = c["quotaInfo"]["resetTime"].as_str().unwrap_or("").to_string();
+            let reset_time = c["quotaInfo"]["resetTime"]
+                .as_str()
+                .unwrap_or("")
+                .to_string();
             Some(ModelQuota {
                 label: label.to_string(),
                 remaining_fraction: remaining,
@@ -381,7 +405,11 @@ fn extract_arg(line: &str, flag: &str) -> Option<String> {
         .find(|c: char| c == ' ' || c == '"' || c == '\r' || c == '\n')
         .unwrap_or(after.len());
     let val = after[..end].trim().to_string();
-    if val.is_empty() { None } else { Some(val) }
+    if val.is_empty() {
+        None
+    } else {
+        Some(val)
+    }
 }
 
 fn extract_pid(line: &str) -> Option<u32> {
@@ -449,14 +477,18 @@ fn parse_cloud_models(v: &serde_json::Value) -> Vec<ModelQuota> {
         Some(m) => m,
         None => return vec![],
     };
-    let mut models: Vec<ModelQuota> = map.values()
+    let mut models: Vec<ModelQuota> = map
+        .values()
         .filter_map(|m| {
             let label = m["displayName"].as_str()?;
             if label.is_empty() {
                 return None;
             }
             let remaining = m["quotaInfo"]["remainingFraction"].as_f64().unwrap_or(1.0);
-            let reset_time = m["quotaInfo"]["resetTime"].as_str().unwrap_or("").to_string();
+            let reset_time = m["quotaInfo"]["resetTime"]
+                .as_str()
+                .unwrap_or("")
+                .to_string();
             Some(ModelQuota {
                 label: label.to_string(),
                 remaining_fraction: remaining,
@@ -473,8 +505,13 @@ fn parse_cloud_models(v: &serde_json::Value) -> Vec<ModelQuota> {
 /// Within the same group, the original relative order is preserved (stable sort).
 fn model_sort_key(label: &str) -> u8 {
     let lower = label.to_lowercase();
-    if lower.contains("gemini")     { 0 }
-    else if lower.contains("claude") { 1 }
-    else if lower.contains("gpt")    { 2 }
-    else                             { 3 }
+    if lower.contains("gemini") {
+        0
+    } else if lower.contains("claude") {
+        1
+    } else if lower.contains("gpt") {
+        2
+    } else {
+        3
+    }
 }

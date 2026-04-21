@@ -26,7 +26,7 @@ impl ClaudeCodeData {
         let (is_peak, peak_status) = compute_peak_status();
         Self {
             is_available: false,
-            status_line: "Cargando...".to_string(),
+            status_line: crate::t("Cargando...", "Loading...").to_string(),
             five_hour: None,
             seven_day: None,
             daily_tokens: 0,
@@ -84,7 +84,7 @@ struct ApiPeriod {
 pub async fn get_data() -> ClaudeCodeData {
     let userprofile = match std::env::var("USERPROFILE") {
         Ok(v) => v,
-        Err(_) => return ClaudeCodeData::unavailable("USERPROFILE no encontrado"),
+        Err(_) => return ClaudeCodeData::unavailable(crate::t("USERPROFILE no encontrado", "USERPROFILE not found")),
     };
 
     let creds_path = PathBuf::from(&userprofile)
@@ -99,11 +99,11 @@ pub async fn get_data() -> ClaudeCodeData {
     let (five_hour, seven_day) = fetch_quota(&token).await;
     let (daily_tokens, daily_cost) = read_daily_jsonl(&userprofile);
 
-    let status_line = format!(
-        "{} tokens · ${:.2} hoy",
-        fmt_number(daily_tokens),
-        daily_cost
-    );
+    let status_line = if crate::is_es() {
+        format!("{} tokens · ${:.2} hoy", fmt_number(daily_tokens), daily_cost)
+    } else {
+        format!("{} tokens · ${:.2} today", fmt_number(daily_tokens), daily_cost)
+    };
 
     let (is_peak_hours, peak_status) = compute_peak_status();
 
@@ -123,10 +123,10 @@ pub async fn get_data() -> ClaudeCodeData {
 // ── Step 1: read token ───────────────────────────────────────────────────────
 
 fn read_token(path: &PathBuf) -> Result<String, String> {
-    let content = std::fs::read_to_string(path)
-        .map_err(|_| "Claude Code no encontrado".to_string())?;
-    let creds: Credentials = serde_json::from_str(&content)
-        .map_err(|_| "Error leyendo credenciales".to_string())?;
+    let content =
+        std::fs::read_to_string(path).map_err(|_| crate::t("Claude Code no encontrado", "Claude Code not found").to_string())?;
+    let creds: Credentials =
+        serde_json::from_str(&content).map_err(|_| crate::t("Error leyendo credenciales", "Error reading credentials").to_string())?;
     Ok(creds.claude_ai_oauth.access_token)
 }
 
@@ -299,7 +299,7 @@ fn compute_peak_status() -> (bool, String) {
     let hour = now_pt.hour(); // 0..23
 
     if is_weekend {
-        return (false, "Off-Peak (weekend)".to_string());
+        return (false, crate::t("Off-Peak (fin de semana)", "Off-Peak (weekend)").to_string());
     }
 
     // Peak = 5:00 AM (inclusive) to 11:00 AM (exclusive)
