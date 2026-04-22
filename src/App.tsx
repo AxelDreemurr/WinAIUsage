@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { getVersion } from "@tauri-apps/api/app";
 import { listen } from "@tauri-apps/api/event";
 import "./App.css";
 
@@ -300,13 +301,13 @@ function CodexCard({ data, refreshing }: { data: CodexData; refreshing: boolean 
 
 // ── About modal ───────────────────────────────────────────────────────────────
 
-function AboutModal({ onClose }: { onClose: () => void }) {
+function AboutModal({ onClose, version }: { onClose: () => void, version: string }) {
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal-card" onClick={(e) => e.stopPropagation()}>
         <button className="modal-close" onClick={onClose}>✕</button>
         <div className="modal-title">WinAIUsage</div>
-        <div className="modal-version">v1.0.0</div>
+        <div className="modal-version">v{version}</div>
         <div className="modal-divider" />
         <div className="modal-author">{t("developedBy")} @AxelDreemurr</div>
         <button
@@ -364,6 +365,7 @@ function SettingsModal({ settings, onClose, onSave }: { settings: AppSettings, o
 function App() {
   const [data, setData] = useState<AllUsageData | null>(null);
   const [settings, setSettings] = useState<AppSettings>(defaultSettings);
+  const [appVersion, setAppVersion] = useState<string>("...");
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [, setTick] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
@@ -373,6 +375,7 @@ function App() {
   const unlistenRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
+    getVersion().then(setAppVersion).catch(console.error);
     invoke<AppSettings>("get_settings").then(setSettings).catch(console.error);
 
     const lang = navigator.language.toLowerCase().startsWith("es") ? "es" : "en";
@@ -477,12 +480,12 @@ function App() {
         )}
       </div>
 
-      {showAbout && <AboutModal onClose={() => setShowAbout(false)} />}
+      {showAbout && <AboutModal onClose={() => setShowAbout(false)} version={appVersion} />}
       {showSettings && <SettingsModal settings={settings} onClose={() => setShowSettings(false)} onSave={handleSaveSettings} />}
 
       <div className="popup-footer">
         <span className="footer-app-name" onClick={() => setShowAbout(true)}>
-          WinAIUsage v1.0.0
+          WinAIUsage v{appVersion}
         </span>
         {lastUpdated && (
           <>
