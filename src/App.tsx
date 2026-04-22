@@ -37,9 +37,40 @@ interface AntigravityData {
   error: string | null;
 }
 
+interface CodexUsagePeriod {
+  label_key: "codexSession" | "codexWeek";
+  utilization: number;
+  resets_at: string;
+}
+
+interface CodexData {
+  is_available: boolean;
+  status_line: string;
+  plan_type: string;
+  periods: CodexUsagePeriod[];
+  error: string | null;
+}
+
+interface AppSettings {
+  enable_claude: boolean;
+  enable_codex: boolean;
+  enable_antigravity: boolean;
+  enable_notifications: boolean;
+  open_on_startup: boolean;
+}
+
+const defaultSettings: AppSettings = {
+  enable_claude: true,
+  enable_codex: true,
+  enable_antigravity: true,
+  enable_notifications: true,
+  open_on_startup: false,
+};
+
 interface AllUsageData {
   claude_code: ClaudeCodeData;
   antigravity: AntigravityData;
+  codex: CodexData;
 }
 
 // ── I18n ──────────────────────────────────────────────────────────────────────
@@ -63,7 +94,15 @@ const DICT = {
     updated: "Actualizado",
     session: "Sesión (5h)",
     week: "Semana",
+    codexSession: "Sesión",
+    codexWeek: "Semanal",
     pin: "Fijar ventana",
+    settings: "Configuración",
+    notifications: "Notificaciones",
+    openOnStartup: "Abrir al iniciar sesión",
+    save: "Guardar",
+    aiProviders: "Proveedores de IA",
+    appSettings: "Configuración de la app",
   },
   en: {
     loading: "Loading...",
@@ -80,7 +119,15 @@ const DICT = {
     updated: "Updated",
     session: "Session (5h)",
     week: "Weekly",
+    codexSession: "Session",
+    codexWeek: "Weekly",
     pin: "Pin window",
+    settings: "Settings",
+    notifications: "Notifications",
+    openOnStartup: "Open on startup",
+    save: "Save",
+    aiProviders: "AI Providers",
+    appSettings: "App Settings",
   }
 };
 
@@ -100,8 +147,17 @@ function formatResetsAt(iso: string): string {
   if (!iso) return "";
   const diff = new Date(iso).getTime() - Date.now();
   if (diff <= 0) return t("soon");
-  const h = Math.floor(diff / 3_600_000);
+  
+  const d = Math.floor(diff / 86_400_000);
+  const h = Math.floor((diff % 86_400_000) / 3_600_000);
   const m = Math.floor((diff % 3_600_000) / 60_000);
+  
+  if (d > 0) {
+    if (h > 0) {
+      return `${d}d ${h}h`;
+    }
+    return `${d}d ${m}m`;
+  }
   return h > 0 ? `${h}h ${m}m` : `${m}m`;
 }
 
@@ -231,10 +287,13 @@ function AntigravityCard({ data, refreshing }: { data: AntigravityData; refreshi
   );
 }
 
-function CodexCard({ refreshing }: { refreshing: boolean }) {
+function CodexCard({ data, refreshing }: { data: CodexData; refreshing: boolean }) {
   return (
-    <CardShell name="Codex" active={false} refreshing={refreshing}>
-      <div className="card-status">{t("noSession")}</div>
+    <CardShell name="Codex" active={data.is_available} refreshing={refreshing}>
+      <div className="card-status">{data.status_line || data.error || t("notAvailable")}</div>
+      {data.is_available && data.periods && data.periods.map((p, i) => (
+        <ProgressBar key={i} pct={p.utilization} label={t(p.label_key)} resetAt={p.resets_at} />
+      ))}
     </CardShell>
   );
 }
@@ -247,7 +306,7 @@ function AboutModal({ onClose }: { onClose: () => void }) {
       <div className="modal-card" onClick={(e) => e.stopPropagation()}>
         <button className="modal-close" onClick={onClose}>✕</button>
         <div className="modal-title">WinAIUsage</div>
-        <div className="modal-version">v0.1.2</div>
+        <div className="modal-version">v1.0.0</div>
         <div className="modal-divider" />
         <div className="modal-author">{t("developedBy")} @AxelDreemurr</div>
         <button
@@ -261,28 +320,65 @@ function AboutModal({ onClose }: { onClose: () => void }) {
   );
 }
 
+// ── Settings modal ────────────────────────────────────────────────────────────
+
+function SettingsModal({ settings, onClose, onSave }: { settings: AppSettings, onClose: () => void, onSave: (s: AppSettings) => void }) {
+  const [s, setS] = useState(settings);
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal-card" onClick={(e) => e.stopPropagation()}>
+        <button className="modal-close" onClick={onClose}>✕</button>
+        <div className="modal-title">{t("settings")}</div>
+        <div className="modal-divider" />
+        
+        <div className="modal-section-title">{t("aiProviders")}</div>
+        <div className="settings-row">
+          <label><input type="checkbox" checked={s.enable_claude} onChange={e => setS({...s, enable_claude: e.target.checked})} /> Claude Code</label>
+        </div>
+        <div className="settings-row">
+          <label><input type="checkbox" checked={s.enable_codex} onChange={e => setS({...s, enable_codex: e.target.checked})} /> Codex</label>
+        </div>
+        <div className="settings-row">
+          <label><input type="checkbox" checked={s.enable_antigravity} onChange={e => setS({...s, enable_antigravity: e.target.checked})} /> Antigravity</label>
+        </div>
+
+        <div className="modal-divider" />
+        
+        <div className="modal-section-title">{t("appSettings")}</div>
+        <div className="settings-row">
+          <label><input type="checkbox" checked={s.enable_notifications} onChange={e => setS({...s, enable_notifications: e.target.checked})} /> {t("notifications")}</label>
+        </div>
+        <div className="settings-row">
+          <label><input type="checkbox" checked={s.open_on_startup} onChange={e => setS({...s, open_on_startup: e.target.checked})} /> {t("openOnStartup")}</label>
+        </div>
+
+        <button className="modal-btn" onClick={() => { onSave(s); onClose(); }}>{t("save")}</button>
+      </div>
+    </div>
+  );
+}
+
 // ── App ───────────────────────────────────────────────────────────────────────
 
 function App() {
   const [data, setData] = useState<AllUsageData | null>(null);
+  const [settings, setSettings] = useState<AppSettings>(defaultSettings);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [, setTick] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
   const [showAbout, setShowAbout] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
   const [isPinned, setIsPinned] = useState(false);
   const unlistenRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
-    invoke<Lang>("get_lang")
-      .then(l => {
-        currentLang = l;
-        setTick((t) => t + 1);
-      })
-      .catch((e) => {
-        console.error("Failed to get lang:", e);
-        currentLang = "es";
-        setTick((t) => t + 1);
-      });
+    invoke<AppSettings>("get_settings").then(setSettings).catch(console.error);
+
+    const lang = navigator.language.toLowerCase().startsWith("es") ? "es" : "en";
+    currentLang = lang;
+    setTick((t) => t + 1);
+    invoke("set_lang", { lang }).catch(console.error);
 
     // Load cached data immediately
     invoke<AllUsageData>("get_all_usage_data").then((d) => {
@@ -323,6 +419,13 @@ function App() {
     invoke<boolean>("toggle_pin").then(setIsPinned);
   }
 
+  function handleSaveSettings(newSettings: AppSettings) {
+    invoke("save_settings", { settings: newSettings }).then(() => {
+      setSettings(newSettings);
+      handleRefresh(); // Refresh data with new settings
+    }).catch(console.error);
+  }
+
   return (
     <div className="popup">
       <div className="popup-header">
@@ -341,6 +444,17 @@ function App() {
           </button>
           <button
             className="btn-icon"
+            onClick={() => setShowSettings(true)}
+            title={t("settings")}
+            style={{ display: 'flex', alignItems: 'center' }}
+          >
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="12" r="3"></circle>
+              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+            </svg>
+          </button>
+          <button
+            className="btn-icon"
             onClick={handleRefresh}
             title={t("refreshNow")}
             style={{ opacity: refreshing ? 0.4 : 1 }}
@@ -354,9 +468,9 @@ function App() {
       <div className="popup-body">
         {data ? (
           <>
-            <ClaudeCard data={data.claude_code} refreshing={refreshing} />
-            <CodexCard refreshing={refreshing} />
-            <AntigravityCard data={data.antigravity} refreshing={refreshing} />
+            {settings.enable_claude && <ClaudeCard data={data.claude_code} refreshing={refreshing} />}
+            {settings.enable_codex && <CodexCard data={data.codex} refreshing={refreshing} />}
+            {settings.enable_antigravity && <AntigravityCard data={data.antigravity} refreshing={refreshing} />}
           </>
         ) : (
           <div className="card-status" style={{ padding: "8px 0" }}>{t("loading")}</div>
@@ -364,10 +478,11 @@ function App() {
       </div>
 
       {showAbout && <AboutModal onClose={() => setShowAbout(false)} />}
+      {showSettings && <SettingsModal settings={settings} onClose={() => setShowSettings(false)} onSave={handleSaveSettings} />}
 
       <div className="popup-footer">
         <span className="footer-app-name" onClick={() => setShowAbout(true)}>
-          WinAIUsage v0.1.2
+          WinAIUsage v1.0.0
         </span>
         {lastUpdated && (
           <>

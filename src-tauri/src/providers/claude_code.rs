@@ -96,7 +96,10 @@ pub async fn get_data() -> ClaudeCodeData {
         Err(e) => return ClaudeCodeData::unavailable(e),
     };
 
-    let (five_hour, seven_day) = fetch_quota(&token).await;
+    let (five_hour, seven_day) = match fetch_quota(&token).await {
+        Ok(res) => res,
+        Err(e) => return ClaudeCodeData::unavailable(e),
+    };
     let (daily_tokens, daily_cost) = read_daily_jsonl(&userprofile);
 
     let status_line = if crate::is_es() {
@@ -132,10 +135,10 @@ fn read_token(path: &PathBuf) -> Result<String, String> {
 
 // ── Step 2: quota API ────────────────────────────────────────────────────────
 
-async fn fetch_quota(token: &str) -> (Option<UsagePeriod>, Option<UsagePeriod>) {
+async fn fetch_quota(token: &str) -> Result<(Option<UsagePeriod>, Option<UsagePeriod>), String> {
     let client = match reqwest::Client::builder().build() {
         Ok(c) => c,
-        Err(_) => return (None, None),
+        Err(_) => return Ok((None, None)),
     };
 
     let result = client
@@ -148,12 +151,15 @@ async fn fetch_quota(token: &str) -> (Option<UsagePeriod>, Option<UsagePeriod>) 
 
     let resp = match result {
         Ok(r) if r.status().is_success() => r,
-        _ => return (None, None),
+        Ok(r) if r.status().as_u16() == 401 || r.status().as_u16() == 403 => {
+            return Err(crate::t("Sesión expirada. Ejecuta 'claude login'", "Session expired. Run 'claude login'").to_string());
+        }
+        _ => return Ok((None, None)),
     };
 
     let data: ApiResponse = match resp.json().await {
         Ok(d) => d,
-        Err(_) => return (None, None),
+        Err(_) => return Ok((None, None)),
     };
 
     let five = data.five_hour.map(|p| UsagePeriod {
@@ -165,7 +171,7 @@ async fn fetch_quota(token: &str) -> (Option<UsagePeriod>, Option<UsagePeriod>) 
         resets_at: p.resets_at.unwrap_or_default(),
     });
 
-    (five, seven)
+    Ok((five, seven))
 }
 
 // ── Step 3: JSONL local ──────────────────────────────────────────────────────

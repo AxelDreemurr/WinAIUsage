@@ -40,7 +40,7 @@ impl AntigravityData {
             is_available: false,
             plan_name: String::new(),
             models: vec![],
-            status_line: crate::t("Antigravity no está corriendo", "Antigravity is not running").to_string(),
+            status_line: crate::t("Abre Antigravity para monitorear su uso", "Open Antigravity to monitor its usage").to_string(),
             error: None,
         }
     }

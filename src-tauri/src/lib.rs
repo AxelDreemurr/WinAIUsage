@@ -1,4 +1,5 @@
 mod providers;
+pub mod settings;
 
 use std::collections::HashSet;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -16,6 +17,7 @@ use tauri::{
 pub struct AllUsageData {
     pub claude_code: providers::claude_code::ClaudeCodeData,
     pub antigravity: providers::antigravity::AntigravityData,
+    pub codex: providers::codex::CodexData,
 }
 
 impl AllUsageData {
@@ -23,6 +25,7 @@ impl AllUsageData {
         Self {
             claude_code: providers::claude_code::ClaudeCodeData::loading(),
             antigravity: providers::antigravity::AntigravityData::loading(),
+            codex: providers::codex::CodexData::loading(),
         }
     }
 }
@@ -51,6 +54,11 @@ async fn open_url(url: String) {
 #[tauri::command]
 fn get_lang() -> String {
     if is_es() { "es".to_string() } else { "en".to_string() }
+}
+
+#[tauri::command]
+fn set_lang(lang: String) {
+    LANG_ES.store(lang.starts_with("es"), Ordering::Relaxed);
 }
 
 #[tauri::command]
@@ -94,19 +102,48 @@ async fn refresh_now(
 // ── Fetch helper ──────────────────────────────────────────────────────────────
 
 async fn fetch_all() -> AllUsageData {
-    let (claude, antigravity) = tokio::join!(
-        providers::claude_code::get_data(),
-        providers::antigravity::get_data(),
-    );
+    let settings = settings::read_settings();
+
+    let claude_fut = async {
+        if settings.enable_claude {
+            providers::claude_code::get_data().await
+        } else {
+            providers::claude_code::ClaudeCodeData::loading()
+        }
+    };
+
+    let antigravity_fut = async {
+        if settings.enable_antigravity {
+            providers::antigravity::get_data().await
+        } else {
+            providers::antigravity::AntigravityData::loading()
+        }
+    };
+
+    let codex_fut = async {
+        if settings.enable_codex {
+            providers::codex::get_data().await
+        } else {
+            providers::codex::CodexData::loading()
+        }
+    };
+
+    let (claude, antigravity, codex) = tokio::join!(claude_fut, antigravity_fut, codex_fut);
     AllUsageData {
         claude_code: claude,
         antigravity,
+        codex,
     }
 }
 
 // ── Notifications ─────────────────────────────────────────────────────────────
 
 fn check_and_notify(app: &tauri::AppHandle, data: &AllUsageData) {
+    let settings = settings::read_settings();
+    if !settings.enable_notifications {
+        return;
+    }
+
     let alerted = app.state::<AlertedSet>().0.clone();
     let thresholds = [(80.0_f64, "80%"), (99.0_f64, "99%")];
 
@@ -119,6 +156,14 @@ fn check_and_notify(app: &tauri::AppHandle, data: &AllUsageData) {
     for m in &data.antigravity.models {
         let key_prefix = format!("antigravity:{}", m.label);
         fire_if_needed(app, &alerted, &key_prefix, m.percent_used, &thresholds, &format!("Antigravity · {}", m.label));
+    }
+    for (i, p) in data.codex.periods.iter().enumerate() {
+        let label = if p.label_key == "codexWeek" {
+            t("Codex · Semanal", "Codex · Weekly")
+        } else {
+            t("Codex · Sesión", "Codex · Session")
+        };
+        fire_if_needed(app, &alerted, &format!("codex:{}", i), p.utilization, &thresholds, label);
     }
 }
 
@@ -149,6 +194,7 @@ fn fire_if_needed(
                     .builder()
                     .title(&format!("⚠️ {}", label))
                     .body(&body)
+                    .sound("default")
                     .show();
                 set.insert(key);
             }
@@ -186,6 +232,7 @@ fn toggle_window(window: &tauri::WebviewWindow) {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_autostart::init(tauri_plugin_autostart::MacosLauncher::LaunchAgent, Some(vec![])))
         .manage(UsageState(Arc::new(Mutex::new(None))))
         .manage(AlertedSet(Arc::new(Mutex::new(HashSet::new()))))
         .plugin(tauri_plugin_opener::init())
@@ -195,7 +242,10 @@ pub fn run() {
             refresh_now,
             open_url,
             get_lang,
-            toggle_pin
+            set_lang,
+            toggle_pin,
+            settings::get_settings,
+            settings::save_settings
         ])
         .setup(|app| {
             let locale = sys_locale::get_locale().unwrap_or_else(|| "en-US".to_string());
