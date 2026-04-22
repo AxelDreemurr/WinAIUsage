@@ -15,11 +15,16 @@ A modern Windows system tray app that monitors your AI tool usage in real time �
 
 ## ✨ Features
 
-- **Claude Code** — daily token count, estimated cost, 5-hour session bar and weekly quota bar
+- **Claude Code** — daily token count, estimated cost, 5-hour session bar, weekly quota bar, and peak-hour status
+- **Codex** — session and weekly quota monitoring
 - **Antigravity** — per-model quota in real time via the local language server RPC
-- **Auto-polling** every 5 minutes with a manual refresh button
+- **Smart Notifications** — native Windows toasts when you hit 80% or 99% of your quotas
+- **Customizable** — settings modal to toggle providers, notifications, and run on startup
+- **Bilingual** — automatically detects and adapts to English or Spanish systems
 - **Modern design** — no window decorations, semi-transparent dark popup, Windows 11 feel
-- **Lives in the tray** — no taskbar clutter, opens on click, hides on focus loss
+- **Lives in the tray** — no taskbar clutter, opens on click, hides on focus loss, with optional window pinning
+- **Auto-polling** every 5 minutes with a manual refresh button
+- **Ultra-lightweight** — uses barely ~8MB of RAM thanks to its Rust/Tauri backend
 
 ---
 
@@ -29,7 +34,7 @@ A modern Windows system tray app that monitors your AI tool usage in real time �
 |---|---|---|
 | Claude Code | ✅ | OAuth API + local JSONL files |
 | Antigravity | ✅ | Local language server (Connect RPC) |
-| Codex | 🔜 | Coming soon |
+| Codex | ✅ | Codex CLI tokens + ChatGPT API |
 
 ---
 
