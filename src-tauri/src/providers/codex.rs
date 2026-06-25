@@ -139,6 +139,15 @@ fn window_to_period(window: Option<&UsageWindowInfo>) -> Option<UsagePeriod> {
     })
 }
 
+fn format_plan_type(plan: String) -> String {
+    let plan = plan.trim();
+    let Some(first) = plan.chars().next() else {
+        return "Codex".to_string();
+    };
+
+    format!("{}{}", first.to_uppercase().collect::<String>(), &plan[first.len_utf8()..])
+}
+
 pub async fn get_data() -> CodexData {
     let userprofile = match std::env::var("USERPROFILE") {
         Ok(v) => v,
@@ -229,6 +238,7 @@ pub async fn get_data() -> CodexData {
         }
     }
 
+    plan_type = format_plan_type(plan_type);
     let status_line = format!("{} · {}", plan_type, crate::t("Sesión activa", "Active session"));
 
     CodexData {
@@ -237,5 +247,18 @@ pub async fn get_data() -> CodexData {
         plan_type,
         periods,
         error: None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::format_plan_type;
+
+    #[test]
+    fn capitalizes_codex_plan_type() {
+        assert_eq!(format_plan_type("free".to_string()), "Free");
+        assert_eq!(format_plan_type("plus".to_string()), "Plus");
+        assert_eq!(format_plan_type(" pro ".to_string()), "Pro");
+        assert_eq!(format_plan_type(String::new()), "Codex");
     }
 }

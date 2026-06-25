@@ -1,0 +1,10 @@
+{
+  "bundle": {
+    "targets": "msi",
+    "windows": {
+      "webviewInstallMode": {
+        "type": "offlineInstaller"
+      }
+    }
+  }
+}
