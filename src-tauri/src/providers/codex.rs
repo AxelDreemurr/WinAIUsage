@@ -118,14 +118,14 @@ fn resolve_resets_at(info: &UsageWindowInfo) -> String {
 fn window_to_period(window: Option<&UsageWindowInfo>) -> Option<UsagePeriod> {
     let w = window?;
     let utilization = resolve_percent(w)?;
-    
+
     let mut minutes = w.window_minutes.unwrap_or(0);
     if minutes == 0 {
         if let Some(secs) = w.limit_window_seconds {
             minutes = secs / 60;
         }
     }
-    
+
     let label_key = if minutes >= 10000 {
         "codexWeek".to_string()
     } else {
@@ -145,31 +145,51 @@ fn format_plan_type(plan: String) -> String {
         return "Codex".to_string();
     };
 
-    format!("{}{}", first.to_uppercase().collect::<String>(), &plan[first.len_utf8()..])
+    format!(
+        "{}{}",
+        first.to_uppercase().collect::<String>(),
+        &plan[first.len_utf8()..]
+    )
 }
 
 pub async fn get_data() -> CodexData {
     let userprofile = match std::env::var("USERPROFILE") {
         Ok(v) => v,
-        Err(_) => return CodexData::unavailable(crate::t("USERPROFILE no encontrado", "USERPROFILE not found")),
+        Err(_) => {
+            return CodexData::unavailable(crate::t(
+                "USERPROFILE no encontrado",
+                "USERPROFILE not found",
+            ))
+        }
     };
 
-    let auth_path = PathBuf::from(&userprofile)
-        .join(".codex")
-        .join("auth.json");
+    let auth_path = PathBuf::from(&userprofile).join(".codex").join("auth.json");
 
     let content = match std::fs::read_to_string(&auth_path) {
         Ok(c) => c,
-        Err(_) => return CodexData::unavailable(crate::t("Codex CLI no configurado", "Codex CLI not configured")),
+        Err(_) => {
+            return CodexData::unavailable(crate::t(
+                "Codex CLI no configurado",
+                "Codex CLI not configured",
+            ))
+        }
     };
 
     let auth: AuthFile = match serde_json::from_str(&content) {
         Ok(a) => a,
-        Err(_) => return CodexData::unavailable(crate::t("Error leyendo credenciales", "Error reading credentials")),
+        Err(_) => {
+            return CodexData::unavailable(crate::t(
+                "Error leyendo credenciales",
+                "Error reading credentials",
+            ))
+        }
     };
 
     if auth.tokens.access_token.trim().is_empty() {
-        return CodexData::unavailable(crate::t("Sesión de Codex no iniciada", "Codex session not started"));
+        return CodexData::unavailable(crate::t(
+            "Sesión de Codex no iniciada",
+            "Codex session not started",
+        ));
     }
 
     let client = match reqwest::Client::builder().build() {
@@ -177,13 +197,21 @@ pub async fn get_data() -> CodexData {
         Err(_) => return CodexData::unavailable("HTTP client error"),
     };
 
-    let mut req = client.get("https://chatgpt.com/backend-api/wham/usage")
-        .header("Authorization", format!("Bearer {}", auth.tokens.access_token))
+    let mut req = client
+        .get("https://chatgpt.com/backend-api/wham/usage")
+        .header(
+            "Authorization",
+            format!("Bearer {}", auth.tokens.access_token),
+        )
         .header("Accept", "application/json")
         .header("User-Agent", "codex-cli")
         .timeout(std::time::Duration::from_secs(8));
 
-    let account_id = auth.tokens.account_id.or(auth.account_id).unwrap_or_default();
+    let account_id = auth
+        .tokens
+        .account_id
+        .or(auth.account_id)
+        .unwrap_or_default();
     if !account_id.is_empty() {
         req = req.header("ChatGPT-Account-Id", account_id);
     }
@@ -194,7 +222,10 @@ pub async fn get_data() -> CodexData {
     };
 
     if resp.status().as_u16() == 401 || resp.status().as_u16() == 403 {
-        return CodexData::unavailable(crate::t("Sesión expirada. Ejecuta 'codex login'", "Session expired. Run 'codex login'"));
+        return CodexData::unavailable(crate::t(
+            "Sesión expirada. Ejecuta 'codex login'",
+            "Session expired. Run 'codex login'",
+        ));
     }
 
     if !resp.status().is_success() {
@@ -203,7 +234,12 @@ pub async fn get_data() -> CodexData {
 
     let payload: UsagePayload = match resp.json().await {
         Ok(p) => p,
-        Err(_) => return CodexData::unavailable(crate::t("Error parseando respuesta de la API", "Error parsing API response")),
+        Err(_) => {
+            return CodexData::unavailable(crate::t(
+                "Error parseando respuesta de la API",
+                "Error parsing API response",
+            ))
+        }
     };
 
     let mut plan_type = payload.plan_type.unwrap_or_else(|| "Codex".to_string());
@@ -239,7 +275,11 @@ pub async fn get_data() -> CodexData {
     }
 
     plan_type = format_plan_type(plan_type);
-    let status_line = format!("{} · {}", plan_type, crate::t("Sesión activa", "Active session"));
+    let status_line = format!(
+        "{} · {}",
+        plan_type,
+        crate::t("Sesión activa", "Active session")
+    );
 
     CodexData {
         is_available: true,

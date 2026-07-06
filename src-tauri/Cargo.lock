@@ -5175,7 +5175,7 @@ dependencies = [
 
 [[package]]
 name = "winaiusage"
-version = "1.1.1"
+version = "1.1.2"
 dependencies = [
  "chrono",
  "open",
@@ -5191,6 +5191,7 @@ dependencies = [
  "tauri-plugin-opener",
  "tokio",
  "walkdir",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

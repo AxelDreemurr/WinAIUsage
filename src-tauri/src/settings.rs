@@ -58,7 +58,7 @@ pub fn get_settings() -> AppSettings {
 #[tauri::command]
 pub fn save_settings(app_handle: tauri::AppHandle, settings: AppSettings) -> Result<(), String> {
     write_settings(&settings);
-    
+
     // Manage autostart based on settings.open_on_startup
     let autostart_manager = app_handle.autolaunch();
     if settings.open_on_startup {

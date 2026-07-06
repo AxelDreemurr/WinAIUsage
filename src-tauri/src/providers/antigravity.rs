@@ -40,7 +40,11 @@ impl AntigravityData {
             is_available: false,
             plan_name: String::new(),
             models: vec![],
-            status_line: crate::t("Abre Antigravity para monitorear su uso", "Open Antigravity to monitor its usage").to_string(),
+            status_line: crate::t(
+                "Abre Antigravity para monitorear su uso",
+                "Open Antigravity to monitor its usage",
+            )
+            .to_string(),
             error: None,
         }
     }
@@ -134,9 +138,10 @@ async fn try_language_server() -> Option<AntigravityData> {
         Some(p) => p,
         None => {
             eprintln!("[antigravity] No working port found");
-            return Some(AntigravityData::unavailable(
-                crate::t("Language server sin puerto disponible", "Language server with no port available"),
-            ));
+            return Some(AntigravityData::unavailable(crate::t(
+                "Language server sin puerto disponible",
+                "Language server with no port available",
+            )));
         }
     };
 

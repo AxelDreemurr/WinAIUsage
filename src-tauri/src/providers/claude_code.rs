@@ -84,7 +84,12 @@ struct ApiPeriod {
 pub async fn get_data() -> ClaudeCodeData {
     let userprofile = match std::env::var("USERPROFILE") {
         Ok(v) => v,
-        Err(_) => return ClaudeCodeData::unavailable(crate::t("USERPROFILE no encontrado", "USERPROFILE not found")),
+        Err(_) => {
+            return ClaudeCodeData::unavailable(crate::t(
+                "USERPROFILE no encontrado",
+                "USERPROFILE not found",
+            ))
+        }
     };
 
     let creds_path = PathBuf::from(&userprofile)
@@ -103,9 +108,17 @@ pub async fn get_data() -> ClaudeCodeData {
     let (daily_tokens, daily_cost) = read_daily_jsonl(&userprofile);
 
     let status_line = if crate::is_es() {
-        format!("{} tokens · ${:.2} hoy", fmt_number(daily_tokens), daily_cost)
+        format!(
+            "{} tokens · ${:.2} hoy",
+            fmt_number(daily_tokens),
+            daily_cost
+        )
     } else {
-        format!("{} tokens · ${:.2} today", fmt_number(daily_tokens), daily_cost)
+        format!(
+            "{} tokens · ${:.2} today",
+            fmt_number(daily_tokens),
+            daily_cost
+        )
     };
 
     let (is_peak_hours, peak_status) = compute_peak_status();
@@ -126,10 +139,11 @@ pub async fn get_data() -> ClaudeCodeData {
 // ── Step 1: read token ───────────────────────────────────────────────────────
 
 fn read_token(path: &PathBuf) -> Result<String, String> {
-    let content =
-        std::fs::read_to_string(path).map_err(|_| crate::t("Claude Code no encontrado", "Claude Code not found").to_string())?;
-    let creds: Credentials =
-        serde_json::from_str(&content).map_err(|_| crate::t("Error leyendo credenciales", "Error reading credentials").to_string())?;
+    let content = std::fs::read_to_string(path)
+        .map_err(|_| crate::t("Claude Code no encontrado", "Claude Code not found").to_string())?;
+    let creds: Credentials = serde_json::from_str(&content).map_err(|_| {
+        crate::t("Error leyendo credenciales", "Error reading credentials").to_string()
+    })?;
     Ok(creds.claude_ai_oauth.access_token)
 }
 
@@ -152,7 +166,11 @@ async fn fetch_quota(token: &str) -> Result<(Option<UsagePeriod>, Option<UsagePe
     let resp = match result {
         Ok(r) if r.status().is_success() => r,
         Ok(r) if r.status().as_u16() == 401 || r.status().as_u16() == 403 => {
-            return Err(crate::t("Sesión expirada. Ejecuta 'claude login'", "Session expired. Run 'claude login'").to_string());
+            return Err(crate::t(
+                "Sesión expirada. Ejecuta 'claude login'",
+                "Session expired. Run 'claude login'",
+            )
+            .to_string());
         }
         _ => return Ok((None, None)),
     };
@@ -305,7 +323,10 @@ fn compute_peak_status() -> (bool, String) {
     let hour = now_pt.hour(); // 0..23
 
     if is_weekend {
-        return (false, crate::t("Off-Peak (fin de semana)", "Off-Peak (weekend)").to_string());
+        return (
+            false,
+            crate::t("Off-Peak (fin de semana)", "Off-Peak (weekend)").to_string(),
+        );
     }
 
     // Peak = 5:00 AM (inclusive) to 11:00 AM (exclusive)

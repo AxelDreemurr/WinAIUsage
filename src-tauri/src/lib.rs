@@ -2,6 +2,7 @@ mod providers;
 pub mod settings;
 
 use std::collections::HashSet;
+use std::fs;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -43,6 +44,35 @@ pub fn is_es() -> bool {
 
 pub fn t<'a>(es: &'a str, en: &'a str) -> &'a str {
     if is_es() { es } else { en }
+}
+#[cfg(windows)]
+type SingleInstanceGuard = windows_sys::Win32::Foundation::HANDLE;
+
+#[cfg(not(windows))]
+type SingleInstanceGuard = ();
+
+#[cfg(windows)]
+fn acquire_single_instance() -> Option<SingleInstanceGuard> {
+    use windows_sys::Win32::Foundation::{CloseHandle, GetLastError, ERROR_ALREADY_EXISTS};
+    use windows_sys::Win32::System::Threading::CreateMutexW;
+
+    let name: Vec<u16> = "Local\\WinAIUsageSingleInstance"
+        .encode_utf16()
+        .chain(std::iter::once(0))
+        .collect();
+    let handle = unsafe { CreateMutexW(std::ptr::null(), 1, name.as_ptr()) };
+    if !handle.is_null() && unsafe { GetLastError() } == ERROR_ALREADY_EXISTS {
+        unsafe {
+            let _ = CloseHandle(handle);
+        }
+        return None;
+    }
+    Some(handle)
+}
+
+#[cfg(not(windows))]
+fn acquire_single_instance() -> Option<SingleInstanceGuard> {
+    Some(())
 }
 
 // ── Commands ──────────────────────────────────────────────────────────────────
@@ -205,6 +235,25 @@ fn fire_if_needed(
 
 // ── Window positioning ────────────────────────────────────────────────────────
 
+fn show_first_run_tray_notice(app: &tauri::AppHandle) {
+    use tauri_plugin_notification::NotificationExt;
+
+    let marker = settings::get_settings_path().with_file_name("tray-notice-shown");
+    if marker.exists() {
+        return;
+    }
+
+    let _ = app
+        .notification()
+        .builder()
+        .title(t("WinAIUsage está listo", "WinAIUsage is ready"))
+        .body(t(
+            "WinAIUsage seguirá monitoreando tu uso desde la bandeja del sistema.",
+            "WinAIUsage will keep monitoring your usage from the system tray.",
+        ))
+        .show();
+    let _ = fs::write(marker, "1");
+}
 fn position_window_above_tray(window: &tauri::WebviewWindow) {
     if let Some(monitor) = window.primary_monitor().ok().flatten() {
         let wa = monitor.work_area();
@@ -231,6 +280,11 @@ fn toggle_window(window: &tauri::WebviewWindow) {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let _single_instance = match acquire_single_instance() {
+        Some(guard) => guard,
+        None => return,
+    };
+
     tauri::Builder::default()
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_autostart::init(tauri_plugin_autostart::MacosLauncher::LaunchAgent, Some(vec![])))
@@ -251,6 +305,7 @@ pub fn run() {
         .setup(|app| {
             let locale = sys_locale::get_locale().unwrap_or_else(|| "en-US".to_string());
             LANG_ES.store(locale.starts_with("es"), Ordering::Relaxed);
+            show_first_run_tray_notice(app.handle());
 
             // ── Background polling ────────────────────────────────────────────
             let poll_app = app.handle().clone();
