@@ -1,8 +1,14 @@
-# 🤖 WinAIUsage
+## 🤖 WinAIUsage
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 A modern Windows system tray app that monitors your AI tool usage in real time — tokens, costs, and quotas at a glance.
+
+<p align="center">
+  <a href="https://apps.microsoft.com/detail/9p2wb4l9l27t?referrer=appbadge&mode=full" target="_blank" rel="noopener noreferrer">
+    <img src="https://get.microsoft.com/images/en-us%20dark.svg" width="200" alt="Get it from Microsoft Store">
+  </a>
+</p>
 
 <p align="center">
   <img src="assets/screenshot.png" alt="WinAIUsage popup screenshot" width="380" />
