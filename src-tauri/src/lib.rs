@@ -12,6 +12,7 @@ use tauri::{
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     Emitter, Manager,
 };
+use tauri_plugin_notification::NotificationExt;
 
 // ── Shared types ──────────────────────────────────────────────────────────────
 
@@ -43,7 +44,11 @@ pub fn is_es() -> bool {
 }
 
 pub fn t<'a>(es: &'a str, en: &'a str) -> &'a str {
-    if is_es() { es } else { en }
+    if is_es() {
+        es
+    } else {
+        en
+    }
 }
 #[cfg(windows)]
 type SingleInstanceGuard = windows_sys::Win32::Foundation::HANDLE;
@@ -84,7 +89,11 @@ async fn open_url(url: String) {
 
 #[tauri::command]
 fn get_lang() -> String {
-    if is_es() { "es".to_string() } else { "en".to_string() }
+    if is_es() {
+        "es".to_string()
+    } else {
+        "en".to_string()
+    }
 }
 
 #[tauri::command]
@@ -169,6 +178,78 @@ async fn fetch_all() -> AllUsageData {
 
 // ── Notifications ─────────────────────────────────────────────────────────────
 
+#[cfg(windows)]
+fn is_packaged() -> bool {
+    use windows_sys::Win32::{
+        Foundation::APPMODEL_ERROR_NO_PACKAGE, Storage::Packaging::Appx::GetCurrentPackageFullName,
+    };
+
+    let mut length = 0;
+    (unsafe { GetCurrentPackageFullName(&mut length, std::ptr::null_mut()) })
+        != APPMODEL_ERROR_NO_PACKAGE
+}
+
+#[cfg(windows)]
+fn escape_xml(value: &str) -> String {
+    value
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+}
+
+#[cfg(all(test, windows))]
+mod notification_tests {
+    use super::escape_xml;
+
+    #[test]
+    fn escapes_toast_text() {
+        assert_eq!(escape_xml("A < B & C > D"), "A &lt; B &amp; C &gt; D");
+    }
+}
+#[cfg(windows)]
+fn show_msix_notification(title: &str, body: &str, sound: bool) -> windows::core::Result<()> {
+    use windows::{
+        core::HSTRING,
+        Data::Xml::Dom::XmlDocument,
+        Win32::System::WinRT::{RoInitialize, RoUninitialize, RO_INIT_MULTITHREADED},
+        UI::Notifications::{ToastNotification, ToastNotificationManager},
+    };
+
+    let initialized = unsafe { RoInitialize(RO_INIT_MULTITHREADED).is_ok() };
+    let result = (|| {
+        let audio = if sound {
+            "<audio src=\"ms-winsoundevent:Notification.Default\" />"
+        } else {
+            ""
+        };
+        let document = XmlDocument::new()?;
+        document.LoadXml(&HSTRING::from(format!(
+            "<toast><visual><binding template=\"ToastGeneric\"><text>{}</text><text>{}</text></binding></visual>{audio}</toast>",
+            escape_xml(title),
+            escape_xml(body),
+        )))?;
+        let notification = ToastNotification::CreateToastNotification(&document)?;
+        ToastNotificationManager::CreateToastNotifier()?.Show(&notification)
+    })();
+    if initialized {
+        unsafe { RoUninitialize() };
+    }
+    result
+}
+fn show_notification(app: &tauri::AppHandle, title: &str, body: &str, sound: bool) -> bool {
+    #[cfg(windows)]
+    if is_packaged() {
+        return show_msix_notification(title, body, sound).is_ok();
+    }
+
+    let builder = app.notification().builder().title(title).body(body);
+    let builder = if sound {
+        builder.sound("default")
+    } else {
+        builder
+    };
+    builder.show().is_ok()
+}
 fn check_and_notify(app: &tauri::AppHandle, data: &AllUsageData) {
     let settings = settings::read_settings();
     if !settings.enable_notifications {
@@ -179,14 +260,35 @@ fn check_and_notify(app: &tauri::AppHandle, data: &AllUsageData) {
     let thresholds = [(80.0_f64, "80%"), (99.0_f64, "99%")];
 
     if let Some(p) = &data.claude_code.five_hour {
-        fire_if_needed(app, &alerted, "claude:5h", p.utilization, &thresholds, t("Claude Code · Sesión (5h)", "Claude Code · Session (5h)"));
+        fire_if_needed(
+            app,
+            &alerted,
+            "claude:5h",
+            p.utilization,
+            &thresholds,
+            t("Claude Code · Sesión (5h)", "Claude Code · Session (5h)"),
+        );
     }
     if let Some(p) = &data.claude_code.seven_day {
-        fire_if_needed(app, &alerted, "claude:7d", p.utilization, &thresholds, t("Claude Code · Semana", "Claude Code · Weekly"));
+        fire_if_needed(
+            app,
+            &alerted,
+            "claude:7d",
+            p.utilization,
+            &thresholds,
+            t("Claude Code · Semana", "Claude Code · Weekly"),
+        );
     }
     for m in &data.antigravity.models {
         let key_prefix = format!("antigravity:{}", m.label);
-        fire_if_needed(app, &alerted, &key_prefix, m.percent_used, &thresholds, &format!("Antigravity · {}", m.label));
+        fire_if_needed(
+            app,
+            &alerted,
+            &key_prefix,
+            m.percent_used,
+            &thresholds,
+            &format!("Antigravity · {}", m.label),
+        );
     }
     for (i, p) in data.codex.periods.iter().enumerate() {
         let label = if p.label_key == "codexWeek" {
@@ -194,7 +296,14 @@ fn check_and_notify(app: &tauri::AppHandle, data: &AllUsageData) {
         } else {
             t("Codex · Sesión", "Codex · Session")
         };
-        fire_if_needed(app, &alerted, &format!("codex:{}", i), p.utilization, &thresholds, label);
+        fire_if_needed(
+            app,
+            &alerted,
+            &format!("codex:{}", i),
+            p.utilization,
+            &thresholds,
+            label,
+        );
     }
 }
 
@@ -206,7 +315,6 @@ fn fire_if_needed(
     thresholds: &[(f64, &str)],
     label: &str,
 ) {
-    use tauri_plugin_notification::NotificationExt;
     let mut set = alerted.lock().unwrap();
     for (threshold, threshold_label) in thresholds {
         if pct >= *threshold {
@@ -221,12 +329,7 @@ fn fire_if_needed(
                         format!("{:.0}% quota used", pct)
                     }
                 };
-                let _ = app.notification()
-                    .builder()
-                    .title(&format!("⚠️ {}", label))
-                    .body(&body)
-                    .sound("default")
-                    .show();
+                let _ = show_notification(app, &format!("\u{26a0}\u{fe0f} {}", label), &body, true);
                 set.insert(key);
             }
         }
@@ -236,23 +339,22 @@ fn fire_if_needed(
 // ── Window positioning ────────────────────────────────────────────────────────
 
 fn show_first_run_tray_notice(app: &tauri::AppHandle) {
-    use tauri_plugin_notification::NotificationExt;
-
     let marker = settings::get_settings_path().with_file_name("tray-notice-shown");
     if marker.exists() {
         return;
     }
 
-    let _ = app
-        .notification()
-        .builder()
-        .title(t("WinAIUsage está listo", "WinAIUsage is ready"))
-        .body(t(
-            "WinAIUsage seguirá monitoreando tu uso desde la bandeja del sistema.",
+    if show_notification(
+        app,
+        t("WinAIUsage est\u{00e1} listo", "WinAIUsage is ready"),
+        t(
+            "WinAIUsage seguir\u{00e1} monitoreando tu uso desde la bandeja del sistema.",
             "WinAIUsage will keep monitoring your usage from the system tray.",
-        ))
-        .show();
-    let _ = fs::write(marker, "1");
+        ),
+        false,
+    ) {
+        let _ = fs::write(marker, "1");
+    }
 }
 fn position_window_above_tray(window: &tauri::WebviewWindow) {
     if let Some(monitor) = window.primary_monitor().ok().flatten() {
@@ -287,7 +389,10 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_notification::init())
-        .plugin(tauri_plugin_autostart::init(tauri_plugin_autostart::MacosLauncher::LaunchAgent, Some(vec![])))
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            Some(vec![]),
+        ))
         .manage(UsageState(Arc::new(Mutex::new(None))))
         .manage(AlertedSet(Arc::new(Mutex::new(HashSet::new()))))
         .plugin(tauri_plugin_opener::init())
@@ -328,7 +433,8 @@ pub fn run() {
             let focus_lost_at: Arc<Mutex<Option<Instant>>> = Arc::new(Mutex::new(None));
             let focus_lost_at_tray = focus_lost_at.clone();
 
-            let show_item = MenuItem::with_id(app, "show", t("Mostrar", "Show"), true, None::<&str>)?;
+            let show_item =
+                MenuItem::with_id(app, "show", t("Mostrar", "Show"), true, None::<&str>)?;
             let quit_item = MenuItem::with_id(app, "quit", t("Salir", "Quit"), true, None::<&str>)?;
             let menu = Menu::with_items(app, &[&show_item, &quit_item])?;
 
