@@ -1,3 +1,4 @@
+use crate::pricing::{self, DailyUsage, TokenUsage};
 use serde::Serialize;
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
@@ -21,6 +22,8 @@ pub struct AntigravityData {
     pub plan_name: String,
     pub models: Vec<ModelQuota>,
     pub status_line: String,
+    /// Today's tokens and API-equivalent cost, from the local conversation databases.
+    pub today: Option<DailyUsage>,
     pub error: Option<String>,
 }
 
@@ -31,6 +34,7 @@ impl AntigravityData {
             plan_name: String::new(),
             models: vec![],
             status_line: crate::t("Cargando...", "Loading...").to_string(),
+            today: None,
             error: None,
         }
     }
@@ -45,6 +49,7 @@ impl AntigravityData {
                 "Open Antigravity to monitor its usage",
             )
             .to_string(),
+            today: None,
             error: None,
         }
     }
@@ -55,6 +60,7 @@ impl AntigravityData {
             plan_name: String::new(),
             models: vec![],
             status_line: String::new(),
+            today: None,
             error: Some(error.into()),
         }
     }
@@ -72,6 +78,7 @@ impl AntigravityData {
             plan_name: plan,
             models,
             status_line,
+            today: None,
             error: None,
         }
     }
@@ -80,6 +87,17 @@ impl AntigravityData {
 // ── Entry point ───────────────────────────────────────────────────────────────
 
 pub async fn get_data() -> AntigravityData {
+    // Local databases don't depend on the language server, so today's usage shows even when it's closed.
+    let today = tokio::task::spawn_blocking(|| read_usage(pricing::today()))
+        .await
+        .ok();
+
+    let mut data = fetch_status().await;
+    data.today = today;
+    data
+}
+
+async fn fetch_status() -> AntigravityData {
     if let Some(data) = try_language_server().await {
         return data;
     }
@@ -518,5 +536,200 @@ fn model_sort_key(label: &str) -> u8 {
         2
     } else {
         3
+    }
+}
+
+// ── Local conversation databases ──────────────────────────────────────────────
+
+/// Sums one local day's model generations across Antigravity conversations.
+///
+/// Each conversation is a SQLite database (`~/.gemini/antigravity*/conversations/*.db`)
+/// whose `gen_metadata` table holds one protobuf row per generation:
+/// `1.19` model id, `1.9.4.1` creation time (unix seconds), and `1.4` usage stats
+/// (`2` uncached input, `3` output incl. thinking, `4` cache write, `5` cache read).
+/// Rows from older app versions carry no creation time and are skipped.
+fn read_usage(day: chrono::NaiveDate) -> DailyUsage {
+    let mut usage = DailyUsage::default();
+    let Ok(userprofile) = std::env::var("USERPROFILE") else {
+        return usage;
+    };
+    let gemini_dir = std::path::PathBuf::from(userprofile).join(".gemini");
+
+    let Ok(entries) = std::fs::read_dir(&gemini_dir) else {
+        return usage;
+    };
+    for app_dir in entries.filter_map(|e| e.ok()) {
+        if !app_dir
+            .file_name()
+            .to_string_lossy()
+            .starts_with("antigravity")
+        {
+            continue;
+        }
+        let Ok(dbs) = std::fs::read_dir(app_dir.path().join("conversations")) else {
+            continue;
+        };
+        for db in dbs.filter_map(|e| e.ok()).map(|e| e.path()) {
+            if db.extension().is_none_or(|ext| ext != "db") {
+                continue;
+            }
+            // While the app runs, new rows land in the WAL and the .db mtime may not change.
+            let wal = db.with_extension("db-wal");
+            if !pricing::modified_since(&db, day) && !pricing::modified_since(&wal, day) {
+                continue;
+            }
+            for row in read_gen_metadata(&db, &wal) {
+                let Some(stats) = pb::message(&row, &[1]) else {
+                    continue;
+                };
+                let created = pb::message(stats, &[9, 4]).and_then(|t| pb::varint(t, 1));
+                if created.and_then(|t| pricing::local_date_of_unix(t as i64)) != Some(day) {
+                    continue;
+                }
+                let Some(u) = pb::message(stats, &[4]) else {
+                    continue;
+                };
+                let n = |field: u32| pb::varint(u, field).unwrap_or(0);
+                let tokens = TokenUsage {
+                    input: n(2),
+                    output: n(3),
+                    cache_write_5m: n(4),
+                    cache_write_1h: 0,
+                    cache_read: n(5),
+                };
+                let model = pb::string(stats, 19).unwrap_or("unknown");
+                usage.add(model, &tokens, pricing::any(model, tokens.prompt()));
+            }
+        }
+    }
+
+    usage
+}
+
+/// Reads `gen_metadata` from a snapshot copy, so the running app's locks and WAL are untouched.
+fn read_gen_metadata(db: &std::path::Path, wal: &std::path::Path) -> Vec<Vec<u8>> {
+    let dir = std::env::temp_dir().join(format!("winaiusage-ag-{}", std::process::id()));
+    let _ = std::fs::create_dir_all(&dir);
+    let copy = dir.join("conversation.db");
+    let copy_wal = dir.join("conversation.db-wal");
+    let _ = std::fs::remove_file(&copy_wal);
+    let _ = std::fs::remove_file(dir.join("conversation.db-shm"));
+    if std::fs::copy(db, &copy).is_err() {
+        return vec![];
+    }
+    if wal.exists() {
+        let _ = std::fs::copy(wal, &copy_wal);
+    }
+
+    let rows = (|| -> rusqlite::Result<Vec<Vec<u8>>> {
+        let conn = rusqlite::Connection::open(&copy)?;
+        let mut stmt = conn.prepare("SELECT data FROM gen_metadata")?;
+        let rows = stmt
+            .query_map([], |r| r.get::<_, Vec<u8>>(0))?
+            .filter_map(|r| r.ok())
+            .collect();
+        Ok(rows)
+    })()
+    .unwrap_or_default();
+
+    let _ = std::fs::remove_dir_all(&dir);
+    rows
+}
+
+/// Minimal protobuf reader: just enough to walk known field paths.
+mod pb {
+    fn read_varint(buf: &[u8], pos: &mut usize) -> Option<u64> {
+        let mut value = 0u64;
+        for shift in (0..64).step_by(7) {
+            let byte = *buf.get(*pos)?;
+            *pos += 1;
+            value |= u64::from(byte & 0x7f) << shift;
+            if byte < 0x80 {
+                return Some(value);
+            }
+        }
+        None
+    }
+
+    enum Value<'a> {
+        Varint(u64),
+        Bytes(&'a [u8]),
+        Fixed,
+    }
+
+    /// First occurrence of field `wanted` in `buf`.
+    fn field(buf: &[u8], wanted: u32) -> Option<Value<'_>> {
+        let mut pos = 0;
+        while pos < buf.len() {
+            let key = read_varint(buf, &mut pos)?;
+            let (num, wire) = ((key >> 3) as u32, key & 7);
+            let value = match wire {
+                0 => Value::Varint(read_varint(buf, &mut pos)?),
+                1 => {
+                    pos += 8;
+                    Value::Fixed
+                }
+                2 => {
+                    let len = read_varint(buf, &mut pos)? as usize;
+                    let bytes = buf.get(pos..pos.checked_add(len)?)?;
+                    pos += len;
+                    Value::Bytes(bytes)
+                }
+                5 => {
+                    pos += 4;
+                    Value::Fixed
+                }
+                _ => return None,
+            };
+            if num == wanted {
+                return Some(value);
+            }
+        }
+        None
+    }
+
+    /// Nested message at `path` (e.g. `[1, 9, 4]`).
+    pub fn message<'a>(buf: &'a [u8], path: &[u32]) -> Option<&'a [u8]> {
+        path.iter().try_fold(buf, |b, &f| match field(b, f)? {
+            Value::Bytes(bytes) => Some(bytes),
+            _ => None,
+        })
+    }
+
+    pub fn varint(buf: &[u8], num: u32) -> Option<u64> {
+        match field(buf, num)? {
+            Value::Varint(v) => Some(v),
+            _ => None,
+        }
+    }
+
+    pub fn string(buf: &[u8], num: u32) -> Option<&str> {
+        match field(buf, num)? {
+            Value::Bytes(b) => std::str::from_utf8(b).ok(),
+            _ => None,
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        #[test]
+        fn walks_nested_fields() {
+            // 1: { 4: { 2: 300 }, 19: "gemini" }
+            let inner = [0x10, 0xac, 0x02];
+            let mut stats = vec![0x22, inner.len() as u8];
+            stats.extend_from_slice(&inner);
+            stats.extend_from_slice(&[0x9a, 0x01, 6]);
+            stats.extend_from_slice(b"gemini");
+            let mut root = vec![0x0a, stats.len() as u8];
+            root.extend_from_slice(&stats);
+
+            let s = super::message(&root, &[1]).unwrap();
+            assert_eq!(
+                super::varint(super::message(s, &[4]).unwrap(), 2),
+                Some(300)
+            );
+            assert_eq!(super::string(s, 19), Some("gemini"));
+            assert_eq!(super::message(&root, &[2]), None);
+        }
     }
 }

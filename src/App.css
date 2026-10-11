@@ -1,3 +1,102 @@
+/* ── Fluent / WinUI 3 design tokens ─────────────────────────────────────────── */
+
+:root {
+  color-scheme: dark;
+
+  /* Accent (overridden at runtime with the Windows accent palette) */
+  --accent-light1: #4CC2FF;
+  --accent-light2: #60CDFF;
+  --accent-light3: #99EBFF;
+  --accent-dark1: #005FB8;
+  --accent-dark2: #004A83;
+
+  --accent-fill: var(--accent-light2);
+  --accent-fill-hover: color-mix(in srgb, var(--accent-light2) 90%, transparent);
+  --accent-fill-pressed: color-mix(in srgb, var(--accent-light2) 80%, transparent);
+  --accent-text: var(--accent-light3);
+  --text-on-accent: #000000;
+
+  /* Text */
+  --text-primary: #FFFFFF;
+  --text-secondary: rgba(255, 255, 255, 0.786);
+  --text-tertiary: rgba(255, 255, 255, 0.544);
+  --text-disabled: rgba(255, 255, 255, 0.363);
+
+  /* Surfaces */
+  --backdrop-tint: rgba(32, 32, 32, 0.72);
+  --card-fill: rgba(255, 255, 255, 0.0512);
+  --card-stroke: rgba(0, 0, 0, 0.1);
+  --divider-stroke: rgba(255, 255, 255, 0.0837);
+  --dialog-fill: #2B2B2B;
+  --dialog-footer-fill: #202020;
+  --smoke-fill: rgba(0, 0, 0, 0.3);
+
+  /* Controls */
+  --subtle-fill-hover: rgba(255, 255, 255, 0.0605);
+  --subtle-fill-pressed: rgba(255, 255, 255, 0.0419);
+  --control-fill: rgba(255, 255, 255, 0.0605);
+  --control-fill-hover: rgba(255, 255, 255, 0.0837);
+  --control-fill-pressed: rgba(255, 255, 255, 0.0326);
+  --control-stroke: rgba(255, 255, 255, 0.0698);
+  --control-stroke-bottom: rgba(255, 255, 255, 0.0465);
+  --control-strong-stroke: rgba(255, 255, 255, 0.544);
+  --control-strong-fill: rgba(255, 255, 255, 0.786);
+  --control-alt-fill: rgba(0, 0, 0, 0.1);
+  --focus-stroke: #FFFFFF;
+
+  /* Status */
+  --success: #6CCB5F;
+  --caution: #FCE100;
+  --critical: #FF99A4;
+
+  --font-text: "Segoe UI Variable Text", "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
+  --font-display: "Segoe UI Variable Display", "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
+  --font-icons: "Segoe Fluent Icons", "Segoe MDL2 Assets";
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    color-scheme: light;
+
+    --accent-fill: var(--accent-dark1);
+    --accent-fill-hover: color-mix(in srgb, var(--accent-dark1) 90%, transparent);
+    --accent-fill-pressed: color-mix(in srgb, var(--accent-dark1) 80%, transparent);
+    --accent-text: var(--accent-dark2);
+    --text-on-accent: #FFFFFF;
+
+    --text-primary: rgba(0, 0, 0, 0.896);
+    --text-secondary: rgba(0, 0, 0, 0.606);
+    --text-tertiary: rgba(0, 0, 0, 0.446);
+    --text-disabled: rgba(0, 0, 0, 0.361);
+
+    --backdrop-tint: rgba(243, 243, 243, 0.78);
+    --card-fill: rgba(255, 255, 255, 0.7);
+    --card-stroke: rgba(0, 0, 0, 0.0578);
+    --divider-stroke: rgba(0, 0, 0, 0.0803);
+    --dialog-fill: #FFFFFF;
+    --dialog-footer-fill: #F3F3F3;
+    --smoke-fill: rgba(0, 0, 0, 0.3);
+
+    --subtle-fill-hover: rgba(0, 0, 0, 0.0373);
+    --subtle-fill-pressed: rgba(0, 0, 0, 0.0241);
+    --control-fill: rgba(255, 255, 255, 0.7);
+    --control-fill-hover: rgba(249, 249, 249, 0.5);
+    --control-fill-pressed: rgba(249, 249, 249, 0.3);
+    --control-stroke: rgba(0, 0, 0, 0.0578);
+    --control-stroke-bottom: rgba(0, 0, 0, 0.1622);
+    --control-strong-stroke: rgba(0, 0, 0, 0.446);
+    --control-strong-fill: rgba(0, 0, 0, 0.446);
+    --control-alt-fill: rgba(0, 0, 0, 0.0241);
+    --focus-stroke: rgba(0, 0, 0, 0.896);
+
+    --success: #0F7B0F;
+    --caution: #9D5D00;
+    --critical: #C42B1C;
+    }
+}
+
+/* ── Base ─────────────────────────────────────────────────────────────────── */
+
 * {
   box-sizing: border-box;
   margin: 0;
@@ -9,40 +108,64 @@ body,
 #root {
   width: 100%;
   height: 100%;
-  background: transparent;
   overflow: hidden;
 }
 
-body {
-  font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
-  -webkit-font-smoothing: antialiased;
+html {
+  background: transparent;
 }
+
+/* The window itself is the Acrylic surface; the body adds the Fluent tint on top. */
+body {
+  background: var(--backdrop-tint);
+  color: var(--text-primary);
+  font-family: var(--font-text);
+  font-size: 14px;
+  line-height: 20px;
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+  cursor: default;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+}
+
+button:focus-visible,
+.toggle input:focus-visible + .toggle-track {
+  outline: 2px solid var(--focus-stroke);
+  outline-offset: 1px;
+}
+
+.icon {
+  font-family: var(--font-icons);
+  font-size: 16px;
+  line-height: 1;
+  font-weight: normal;
+  font-style: normal;
+}
+
+/* ── Popup shell ──────────────────────────────────────────────────────────── */
 
 .popup {
-  position: relative;
-  width: 100%;
-  height: 100%;
-  background: rgba(28, 28, 28, 0.95);
-  border-radius: 12px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
   display: flex;
   flex-direction: column;
-  overflow: hidden;
+  max-height: 100%;
 }
 
 .popup-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 12px 14px 8px;
+  padding: 8px 8px 4px 16px;
   flex-shrink: 0;
 }
 
-.popup-header span {
-  font-size: 12px;
-  color: #888;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
+.popup-title {
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 20px;
 }
 
 .header-actions {
@@ -51,305 +174,453 @@ body {
   gap: 2px;
 }
 
-.btn-icon {
-  background: none;
+.btn-subtle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  background: transparent;
   border: none;
-  color: #666;
-  font-size: 16px;
-  cursor: pointer;
-  line-height: 1;
-  padding: 2px 5px;
   border-radius: 4px;
-  transition: color 0.15s, background 0.15s;
-}
-
-.btn-icon:hover {
-  color: #ccc;
-  background: rgba(255, 255, 255, 0.08);
-}
-
-.btn-close {
-  background: none;
-  border: none;
-  color: #666;
-  font-size: 16px;
+  color: var(--text-secondary);
   cursor: pointer;
-  line-height: 1;
-  padding: 2px 4px;
-  border-radius: 4px;
-  transition: color 0.15s, background 0.15s;
 }
 
-.btn-close:hover {
-  color: #ccc;
-  background: rgba(255, 255, 255, 0.08);
+.btn-subtle:hover {
+  background: var(--subtle-fill-hover);
+  color: var(--text-primary);
+}
+
+.btn-subtle:active {
+  background: var(--subtle-fill-pressed);
+  color: var(--text-secondary);
+}
+
+.btn-subtle:disabled {
+  color: var(--text-disabled);
+  background: transparent;
+  cursor: default;
+}
+
+.btn-subtle.checked {
+  color: var(--accent-text);
+}
+
+.btn-subtle .icon.spinning {
+  animation: spin 1s linear infinite;
 }
 
 .popup-body {
-  flex: 1;
+  flex: 0 1 auto;
+  min-height: 0;
   padding: 4px 12px 12px;
   overflow-y: auto;
   scrollbar-width: thin;
-  scrollbar-color: #3a3a3a transparent;
+  scrollbar-color: var(--control-strong-stroke) transparent;
 }
 
-.popup-body::-webkit-scrollbar {
-  width: 4px;
+.popup-content {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
 
-.popup-body::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.popup-body::-webkit-scrollbar-thumb {
-  background: #3a3a3a;
-  border-radius: 2px;
-}
+/* ── Provider card (Fluent SettingsCard-like) ─────────────────────────────── */
 
 .provider-card {
-  background: #2a2a2a;
+  background: var(--card-fill);
+  border: 1px solid var(--card-stroke);
   border-radius: 8px;
-  padding: 12px;
-  margin-bottom: 8px;
-}
-
-.provider-card:last-child {
-  margin-bottom: 0;
+  padding: 12px 16px 14px;
 }
 
 .card-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  margin-bottom: 6px;
+  gap: 8px;
 }
+
+.provider-icon {
+  display: inline-flex;
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+}
+
+.provider-icon svg {
+  width: 100%;
+  height: 100%;
+}
+
+.provider-icon.claude { color: #D97757; }
+.provider-icon.codex { color: var(--text-primary); }
 
 .provider-name {
   font-size: 14px;
   font-weight: 600;
-  color: #fff;
+  line-height: 20px;
+}
+
+.card-header-end {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
 }
 
 .status-dot {
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  flex-shrink: 0;
 }
 
 .status-dot.active {
-  background: #4caf50;
-  box-shadow: 0 0 6px rgba(76, 175, 80, 0.6);
+  background: var(--success);
 }
 
 .status-dot.inactive {
-  background: #555;
+  background: var(--control-strong-stroke);
 }
 
 .card-status {
   font-size: 12px;
-  color: #888;
-  line-height: 1.4;
+  line-height: 16px;
+  color: var(--text-secondary);
+  margin-top: 2px;
 }
 
-.progress-container {
-  margin-top: 8px;
+.card-status.error {
+  color: var(--critical);
+}
+
+.card-empty {
+  font-size: 12px;
+  color: var(--text-secondary);
+  padding: 8px 4px;
+}
+
+/* ── ProgressBar (WinUI 3) ────────────────────────────────────────────────── */
+
+.progress {
+  margin-top: 12px;
 }
 
 .progress-label-row {
   display: flex;
-  justify-content: space-between;
-  font-size: 11px;
-  color: #666;
-  margin-bottom: 3px;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 12px;
+  line-height: 16px;
+  margin-bottom: 6px;
 }
 
-.progress-track {
-  height: 4px;
-  background: #3a3a3a;
-  border-radius: 2px;
+.progress-label {
+  color: var(--text-secondary);
+  white-space: nowrap;
   overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.progress-reset {
+  margin-left: auto;
+  color: var(--text-tertiary);
+  white-space: nowrap;
+}
+
+.progress-value {
+  font-weight: 600;
+  color: var(--text-primary);
+  min-width: 32px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.progress-value.caution { color: var(--caution); }
+.progress-value.critical { color: var(--critical); }
+
+.progress-track {
+  position: relative;
+  height: 3px;
+}
+
+.progress-track::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 1px;
+  height: 1px;
+  background: var(--control-strong-stroke);
 }
 
 .progress-fill {
-  height: 100%;
-  border-radius: 2px;
-  transition: width 0.4s ease;
+  position: relative;
+  height: 3px;
+  border-radius: 1.5px;
+  background: var(--accent-fill);
+  transition: width 0.4s cubic-bezier(0, 0, 0, 1);
 }
 
-.spinner {
-  display: inline-block;
-  width: 8px;
-  height: 8px;
-  border: 1.5px solid #3a3a3a;
-  border-top-color: #aaa;
-  border-radius: 50%;
-  animation: spin 0.65s linear infinite;
-  flex-shrink: 0;
+.progress-fill.caution { background: var(--caution); }
+.progress-fill.critical { background: var(--critical); }
+
+/* ── ProgressRing (small) ─────────────────────────────────────────────────── */
+
+.progress-ring {
+  width: 16px;
+  height: 16px;
+  animation: spin 1s linear infinite;
+}
+
+.progress-ring circle {
+  fill: none;
+  stroke: var(--accent-fill);
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-dasharray: 30 100;
 }
 
 @keyframes spin {
   to { transform: rotate(360deg); }
 }
 
+/* ── Footer ───────────────────────────────────────────────────────────────── */
+
 .popup-footer {
   flex-shrink: 0;
   display: flex;
   align-items: center;
-  padding: 5px 14px 7px;
-  font-size: 11px;
-  color: #444;
-  border-top: 1px solid rgba(255, 255, 255, 0.04);
+  gap: 8px;
+  padding: 8px 16px 10px;
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--text-tertiary);
+  border-top: 1px solid var(--divider-stroke);
 }
 
-.footer-app-name {
+.footer-link {
+  background: none;
+  border: none;
+  border-radius: 4px;
+  padding: 0 2px;
+  margin-left: -2px;
+  color: var(--text-tertiary);
   cursor: pointer;
-  color: #555;
-  transition: color 0.15s;
-  white-space: nowrap;
 }
 
-.footer-app-name:hover {
-  color: #888;
+.footer-link:hover {
+  color: var(--text-secondary);
+  text-decoration: underline;
 }
 
-.footer-sep {
-  color: #3a3a3a;
-}
-
-.popup-footer > span:last-child {
+.footer-updated {
   margin-left: auto;
 }
 
-/* ── Modal ─────────────────────────────────────────────────────────────────── */
+/* ── ContentDialog ────────────────────────────────────────────────────────── */
 
-.modal-overlay {
-  position: absolute;
+.dialog-smoke {
+  position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.6);
+  background: var(--smoke-fill);
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 12px;
+  padding: 12px;
   z-index: 100;
+  animation: fade-in 0.15s ease-out;
 }
 
-.modal-card {
-  position: relative;
-  background: #2a2a2a;
-  border-radius: 12px;
-  padding: 24px;
-  width: 260px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 6px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
-}
-
-.modal-close {
-  position: absolute;
-  top: 10px;
-  right: 10px;
-  background: none;
-  border: none;
-  color: #555;
-  font-size: 14px;
-  cursor: pointer;
-  padding: 2px 5px;
-  border-radius: 4px;
-  transition: color 0.15s, background 0.15s;
-}
-
-.modal-close:hover {
-  color: #ccc;
-  background: rgba(255, 255, 255, 0.08);
-}
-
-.modal-title {
-  font-size: 18px;
-  font-weight: 600;
-  color: #fff;
-  margin-top: 4px;
-}
-
-.modal-version {
-  font-size: 13px;
-  color: #666;
-}
-
-.modal-divider {
+.dialog {
   width: 100%;
-  height: 1px;
-  background: rgba(255, 255, 255, 0.06);
-  margin: 8px 0;
+  max-width: 340px;
+  background: var(--dialog-fill);
+  border: 1px solid var(--card-stroke);
+  border-radius: 8px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.28), 0 2px 8px rgba(0, 0, 0, 0.14);
+  overflow: hidden;
+  animation: dialog-in 0.2s cubic-bezier(0, 0, 0, 1);
 }
 
-.modal-author {
-  font-size: 13px;
-  color: #aaa;
-  text-align: center;
+.dialog-content {
+  padding: 20px 20px 16px;
 }
 
-.modal-btn-link {
-  margin-top: 10px;
-  background: rgba(255, 255, 255, 0.07);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  color: #ccc;
-  font-size: 13px;
-  padding: 7px 18px;
-  border-radius: 6px;
+.dialog-title {
+  font-family: var(--font-display);
+  font-size: 20px;
+  line-height: 28px;
+  font-weight: 600;
+  margin-bottom: 12px;
+}
+
+.dialog-section-title {
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 20px;
+  margin: 12px 0 4px;
+}
+
+.dialog-section-title:first-of-type {
+  margin-top: 0;
+}
+
+.dialog-text {
+  font-size: 14px;
+  line-height: 20px;
+  color: var(--text-secondary);
+}
+
+.dialog-caption {
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--text-tertiary);
+}
+
+.dialog-footer {
+  display: flex;
+  gap: 8px;
+  padding: 20px;
+  background: var(--dialog-footer-fill);
+  border-top: 1px solid var(--card-stroke);
+}
+
+.dialog-footer > button {
+  flex: 1;
+}
+
+@keyframes fade-in {
+  from { opacity: 0; }
+}
+
+@keyframes dialog-in {
+  from { opacity: 0; transform: scale(1.05); }
+}
+
+/* ── Buttons ──────────────────────────────────────────────────────────────── */
+
+.btn {
+  height: 32px;
+  padding: 0 12px;
+  border-radius: 4px;
+  font-size: 14px;
+  line-height: 20px;
   cursor: pointer;
-  transition: background 0.15s, color 0.15s;
+  background: var(--control-fill);
+  border: 1px solid var(--control-stroke);
+  border-bottom-color: var(--control-stroke-bottom);
+  color: var(--text-primary);
 }
 
-.modal-btn-link:hover {
-  background: rgba(255, 255, 255, 0.13);
-  color: #fff;
+.btn:hover {
+  background: var(--control-fill-hover);
 }
+
+.btn:active {
+  background: var(--control-fill-pressed);
+  color: var(--text-secondary);
+}
+
+.btn.accent {
+  background: var(--accent-fill);
+  border-color: rgba(255, 255, 255, 0.08);
+  border-bottom-color: rgba(0, 0, 0, 0.14);
+  color: var(--text-on-accent);
+}
+
+.btn.accent:hover {
+  background: var(--accent-fill-hover);
+}
+
+.btn.accent:active {
+  background: var(--accent-fill-pressed);
+}
+
+/* ── Settings rows + ToggleSwitch ─────────────────────────────────────────── */
 
 .settings-row {
   display: flex;
   align-items: center;
-  padding: 4px 0;
-  color: #E2E8F0;
-  font-size: 13px;
-  width: 100%;
-}
-
-.modal-section-title {
-  width: 100%;
-  font-size: 11px;
-  font-weight: 600;
-  text-transform: uppercase;
-  color: #888;
-  margin-top: 4px;
-  margin-bottom: 2px;
-  letter-spacing: 0.05em;
-}
-
-.settings-row label {
-  display: flex;
-  align-items: center;
-  gap: 8px;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 36px;
+  font-size: 14px;
   cursor: pointer;
-  width: 100%;
 }
 
-.modal-btn {
+.toggle {
+  position: relative;
+  display: inline-flex;
+  flex-shrink: 0;
+}
+
+.toggle input {
+  position: absolute;
+  opacity: 0;
   width: 100%;
-  margin-top: 16px;
-  padding: 8px;
-  background: #3B82F6;
-  color: white;
-  border: none;
-  border-radius: 4px;
+  height: 100%;
+  margin: 0;
   cursor: pointer;
-  font-weight: 500;
-  font-size: 13px;
-  transition: background 0.2s;
 }
 
-.modal-btn:hover {
-  background: #2563EB;
+.toggle-track {
+  width: 40px;
+  height: 20px;
+  border-radius: 10px;
+  border: 1px solid var(--control-strong-stroke);
+  background: var(--control-alt-fill);
+  position: relative;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.toggle-track::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 3px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--control-strong-fill);
+  transform: translateY(-50%);
+  transition: left 0.15s cubic-bezier(0, 0, 0, 1), width 0.1s, height 0.1s;
+}
+
+.toggle:hover .toggle-track::after {
+  width: 14px;
+  height: 14px;
+}
+
+.toggle input:checked + .toggle-track {
+  background: var(--accent-fill);
+  border-color: var(--accent-fill);
+}
+
+.toggle input:checked + .toggle-track::after {
+  left: calc(100% - 3px - 12px);
+  background: var(--text-on-accent);
+}
+
+.toggle:hover input:checked + .toggle-track::after {
+  left: calc(100% - 3px - 14px);
+}
+
+/* ── Browser dev preview (no Acrylic): emulate the window chrome ──────────── */
+
+html.dev-preview {
+  background: linear-gradient(135deg, #1f3b5c 0%, #3c2a55 50%, #5c3a2a 100%);
+}
+
+@media (prefers-color-scheme: light) {
+  html.dev-preview {
+    background: linear-gradient(135deg, #b9d4f1 0%, #d9c8ef 50%, #f3d6c4 100%);
+  }
+}
+
+html.dev-preview body {
+  transform: translateZ(0);
+  border-radius: 8px;
+  outline: 1px solid var(--card-stroke);
+  backdrop-filter: blur(30px) saturate(1.25);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.35);
 }

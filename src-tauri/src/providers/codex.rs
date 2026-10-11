@@ -1,3 +1,4 @@
+use crate::pricing::{self, DailyUsage, TokenUsage};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
@@ -14,6 +15,8 @@ pub struct CodexData {
     pub status_line: String,
     pub plan_type: String,
     pub periods: Vec<UsagePeriod>,
+    /// Today's tokens and API-equivalent cost, from the local session logs.
+    pub today: Option<DailyUsage>,
     pub error: Option<String>,
 }
 
@@ -24,6 +27,7 @@ impl CodexData {
             status_line: crate::t("Cargando...", "Loading...").to_string(),
             plan_type: String::new(),
             periods: vec![],
+            today: None,
             error: None,
         }
     }
@@ -34,6 +38,7 @@ impl CodexData {
             status_line: String::new(),
             plan_type: String::new(),
             periods: vec![],
+            today: None,
             error: Some(error.into()),
         }
     }
@@ -163,7 +168,19 @@ pub async fn get_data() -> CodexData {
         }
     };
 
-    let auth_path = PathBuf::from(&userprofile).join(".codex").join("auth.json");
+    // Local logs don't depend on the usage API, so today's usage shows even when it fails.
+    let codex_dir = PathBuf::from(&userprofile).join(".codex");
+    let today = tokio::task::spawn_blocking(move || read_usage(&codex_dir, pricing::today()))
+        .await
+        .ok();
+
+    let mut data = fetch_status(&userprofile).await;
+    data.today = today;
+    data
+}
+
+async fn fetch_status(userprofile: &str) -> CodexData {
+    let auth_path = PathBuf::from(userprofile).join(".codex").join("auth.json");
 
     let content = match std::fs::read_to_string(&auth_path) {
         Ok(c) => c,
@@ -286,8 +303,95 @@ pub async fn get_data() -> CodexData {
         status_line,
         plan_type,
         periods,
+        today: None,
         error: None,
     }
+}
+
+// ── Local session logs ────────────────────────────────────────────────────────
+
+/// Sums one local day's model responses across Codex session logs.
+///
+/// Newer logs have one `token_usage_record` per response (deduplicated by
+/// `response_id`). Older logs only have `token_count` events, which repeat the
+/// last response's usage; those are counted only when the thread total changes.
+/// OpenAI's `input_tokens` includes cached tokens, and `output_tokens` includes
+/// reasoning tokens.
+fn read_usage(codex_dir: &std::path::Path, day: chrono::NaiveDate) -> DailyUsage {
+    let mut usage = DailyUsage::default();
+
+    let files = ["sessions", "archived_sessions"]
+        .iter()
+        .flat_map(|dir| walkdir::WalkDir::new(codex_dir.join(dir)).into_iter())
+        .filter_map(|e| e.ok())
+        .filter(|e| e.path().extension().is_some_and(|ext| ext == "jsonl"))
+        .filter(|e| pricing::modified_since(e.path(), day));
+
+    for entry in files {
+        let content = match std::fs::read_to_string(entry.path()) {
+            Ok(c) => c,
+            Err(_) => continue,
+        };
+        let has_records = content.contains("\"token_usage_record\"");
+        let mut model = String::from("unknown");
+        let mut seen_responses = std::collections::HashSet::new();
+        let mut last_total: Option<serde_json::Value> = None;
+
+        for line in content.lines() {
+            let v: serde_json::Value = match serde_json::from_str(line) {
+                Ok(v) => v,
+                Err(_) => continue,
+            };
+            let payload = &v["payload"];
+
+            let u = match v["type"].as_str() {
+                Some("turn_context") => {
+                    if let Some(m) = payload["model"].as_str() {
+                        model = m.to_string();
+                    }
+                    continue;
+                }
+                Some("token_usage_record") if has_records => {
+                    let id = payload["response_id"].as_str().unwrap_or_default();
+                    if !id.is_empty() && !seen_responses.insert(id.to_string()) {
+                        continue;
+                    }
+                    &payload["usage"]
+                }
+                Some("event_msg") if !has_records && payload["type"] == "token_count" => {
+                    let total = &payload["info"]["total_token_usage"];
+                    if total.is_null() || last_total.as_ref() == Some(total) {
+                        continue;
+                    }
+                    last_total = Some(total.clone());
+                    &payload["info"]["last_token_usage"]
+                }
+                _ => continue,
+            };
+
+            let date = v["timestamp"].as_str().and_then(pricing::local_date_of);
+            if date != Some(day) {
+                continue;
+            }
+
+            let n = |field: &str| u[field].as_u64().unwrap_or(0);
+            let (input, cached, cache_write) = (
+                n("input_tokens"),
+                n("cached_input_tokens"),
+                n("cache_write_input_tokens"),
+            );
+            let tokens = TokenUsage {
+                input: input.saturating_sub(cached + cache_write),
+                output: n("output_tokens"),
+                cache_write_5m: cache_write,
+                cache_write_1h: 0,
+                cache_read: cached,
+            };
+            usage.add(&model, &tokens, pricing::openai(&model, input));
+        }
+    }
+
+    usage
 }
 
 #[cfg(test)]

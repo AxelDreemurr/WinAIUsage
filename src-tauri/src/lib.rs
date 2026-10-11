@@ -1,3 +1,4 @@
+mod pricing;
 mod providers;
 pub mod settings;
 
@@ -356,6 +357,54 @@ fn show_first_run_tray_notice(app: &tauri::AppHandle) {
         let _ = fs::write(marker, "1");
     }
 }
+/// Windows accent palette as `#RRGGBB`, used by the UI for Fluent accent fills.
+#[derive(serde::Serialize)]
+struct AccentColors {
+    accent: String,
+    light1: String,
+    light2: String,
+    light3: String,
+    dark1: String,
+    dark2: String,
+    dark3: String,
+}
+
+#[tauri::command]
+fn get_accent_colors() -> Option<AccentColors> {
+    use windows::UI::ViewManagement::{UIColorType, UISettings};
+    let settings = UISettings::new().ok()?;
+    let hex = |t: UIColorType| -> Option<String> {
+        let c = settings.GetColorValue(t).ok()?;
+        Some(format!("#{:02X}{:02X}{:02X}", c.R, c.G, c.B))
+    };
+    Some(AccentColors {
+        accent: hex(UIColorType::Accent)?,
+        light1: hex(UIColorType::AccentLight1)?,
+        light2: hex(UIColorType::AccentLight2)?,
+        light3: hex(UIColorType::AccentLight3)?,
+        dark1: hex(UIColorType::AccentDark1)?,
+        dark2: hex(UIColorType::AccentDark2)?,
+        dark3: hex(UIColorType::AccentDark3)?,
+    })
+}
+
+const WINDOW_WIDTH: f64 = 380.0;
+const WINDOW_MAX_HEIGHT: f64 = 650.0;
+
+/// Resizes the popup to fit its content (logical px) and keeps it anchored above the tray.
+#[tauri::command]
+fn set_content_height(window: tauri::WebviewWindow, height: f64) {
+    let height = height.clamp(120.0, WINDOW_MAX_HEIGHT).ceil();
+    let scale = window.scale_factor().unwrap_or(1.0);
+    if let Ok(current) = window.inner_size() {
+        if (current.height as f64 - height * scale).abs() < 1.0 {
+            return;
+        }
+    }
+    let _ = window.set_size(tauri::LogicalSize::new(WINDOW_WIDTH, height));
+    position_window_above_tray(&window);
+}
+
 fn position_window_above_tray(window: &tauri::WebviewWindow) {
     if let Some(monitor) = window.primary_monitor().ok().flatten() {
         let wa = monitor.work_area();
@@ -398,6 +447,8 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
             hide_window,
+            get_accent_colors,
+            set_content_height,
             get_all_usage_data,
             refresh_now,
             open_url,

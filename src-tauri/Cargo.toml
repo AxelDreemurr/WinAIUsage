@@ -25,11 +25,13 @@ serde_json = "1"
 reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
 tokio = { version = "1", features = ["full"] }
 walkdir = "2"
+base64 = "0.22"
+aes-gcm = "0.10"
 chrono = "0.4"
 rusqlite = { version = "0.31", features = ["bundled"] }
 open = "5"
 sys-locale = "0.3"
 tauri-plugin-notification = "2"
 tauri-plugin-autostart = "2.5.1"
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Storage_Packaging_Appx", "Win32_System_Threading"] }
-windows = { version = "0.61.3", features = ["Data_Xml_Dom", "UI_Notifications", "Win32_System_WinRT"] }
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security_Cryptography", "Win32_Storage_Packaging_Appx", "Win32_System_Threading"] }
+windows = { version = "0.61.3", features = ["Data_Xml_Dom", "UI", "UI_Notifications", "UI_ViewManagement", "Win32_System_WinRT"] }
