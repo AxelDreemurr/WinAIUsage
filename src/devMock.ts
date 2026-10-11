@@ -55,7 +55,7 @@ export function installDevMock() {
     (cmd, args) => {
       switch (cmd) {
         case "plugin:app|version":
-          return "1.1.3-dev";
+          return "2.0.0-dev";
         case "get_all_usage_data":
           return usage;
         case "get_settings":
