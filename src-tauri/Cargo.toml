@@ -34,4 +34,4 @@ sys-locale = "0.3"
 tauri-plugin-notification = "2"
 tauri-plugin-autostart = "2.5.1"
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security_Cryptography", "Win32_Storage_Packaging_Appx", "Win32_System_Threading"] }
-windows = { version = "0.61.3", features = ["Data_Xml_Dom", "UI", "UI_Notifications", "UI_ViewManagement", "Win32_System_WinRT"] }
+windows = { version = "0.61.3", features = ["ApplicationModel", "Data_Xml_Dom", "Foundation", "UI", "UI_Notifications", "UI_ViewManagement", "Win32_System_WinRT"] }

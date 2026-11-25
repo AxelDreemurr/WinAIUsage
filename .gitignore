@@ -26,3 +26,6 @@ dist-ssr
 # Local agent instructions
 CLAUDE.md
 AGENTS.md
+
+# MSIX: Store identity manifest stays local (see scripts/build-msix.ps1)
+packaging/AppxManifest.xml

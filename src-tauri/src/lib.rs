@@ -180,7 +180,7 @@ async fn fetch_all() -> AllUsageData {
 // ── Notifications ─────────────────────────────────────────────────────────────
 
 #[cfg(windows)]
-fn is_packaged() -> bool {
+pub(crate) fn is_packaged() -> bool {
     use windows_sys::Win32::{
         Foundation::APPMODEL_ERROR_NO_PACKAGE, Storage::Packaging::Appx::GetCurrentPackageFullName,
     };

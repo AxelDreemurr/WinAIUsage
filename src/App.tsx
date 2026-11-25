@@ -538,8 +538,8 @@ function App() {
   }
 
   function handleSaveSettings(newSettings: AppSettings) {
-    invoke("save_settings", { settings: newSettings }).then(() => {
-      setSettings(newSettings);
+    invoke<AppSettings>("save_settings", { settings: newSettings }).then((applied) => {
+      setSettings(applied);
       handleRefresh(); // Refresh data with new settings
     }).catch(console.error);
   }
