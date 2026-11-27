@@ -2,131 +2,123 @@
   "type": "AdaptiveCard",
   "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
   "version": "1.5",
+  "selectAction": { "type": "Action.Execute", "verb": "open" },
   "body": [
     {
-      "type": "Container",
-      "$when": "${$host.widgetSize == \"small\"}",
-      "selectAction": { "type": "Action.Execute", "verb": "open" },
-      "items": [
+      "type": "TextBlock",
+      "$when": "${!hasRows}",
+      "text": "${empty}",
+      "size": "Small",
+      "isSubtle": true,
+      "wrap": true
+    },
+    {
+      "type": "ColumnSet",
+      "$data": "${rows}",
+      "spacing": "${gap}",
+      "columns": [
         {
-          "type": "TextBlock",
-          "$when": "${!hasRows}",
-          "text": "${empty}",
-          "size": "Small",
-          "isSubtle": true,
-          "wrap": true
-        },
-        {
-          "type": "ColumnSet",
-          "$data": "${rows}",
-          "spacing": "Small",
-          "columns": [
+          "type": "Column",
+          "width": "16px",
+          "verticalContentAlignment": "Center",
+          "items": [
             {
-              "type": "Column",
-              "width": "stretch",
-              "verticalContentAlignment": "Center",
-              "items": [
-                { "type": "TextBlock", "text": "${name}", "size": "Small", "weight": "Bolder" }
-              ]
+              "type": "Image",
+              "$when": "${icon != '' && $host.hostTheme == \"light\"}",
+              "url": "${iconOnLight}",
+              "width": "16px",
+              "height": "16px",
+              "altText": "${name}"
             },
             {
-              "type": "Column",
-              "width": "auto",
-              "verticalContentAlignment": "Center",
-              "items": [
-                { "type": "TextBlock", "text": "${pct}", "size": "Small", "weight": "Bolder", "color": "${color}" }
-              ]
+              "type": "Image",
+              "$when": "${icon != '' && $host.hostTheme != \"light\"}",
+              "url": "${icon}",
+              "width": "16px",
+              "height": "16px",
+              "altText": "${name}"
             }
+          ]
+        },
+        {
+          "type": "Column",
+          "width": 28,
+          "spacing": "Small",
+          "verticalContentAlignment": "Center",
+          "items": [
+            { "type": "TextBlock", "text": "${name}", "size": "Small", "weight": "Bolder", "maxLines": 1 }
+          ]
+        },
+        {
+          "type": "Column",
+          "width": 16,
+          "spacing": "Small",
+          "verticalContentAlignment": "Center",
+          "items": [
+            { "type": "TextBlock", "text": "${label}", "size": "Small", "isSubtle": true, "maxLines": 1 }
+          ]
+        },
+        {
+          "type": "Column",
+          "width": 38,
+          "spacing": "Small",
+          "verticalContentAlignment": "Center",
+          "items": [
+            { "type": "Image", "url": "${bar}", "size": "Stretch", "altText": "${pct}" }
+          ]
+        },
+        {
+          "type": "Column",
+          "width": 18,
+          "spacing": "Small",
+          "verticalContentAlignment": "Center",
+          "items": [
+            { "type": "TextBlock", "text": "${pct}", "size": "Small", "weight": "Bolder", "color": "${color}", "horizontalAlignment": "Right", "maxLines": 1 }
+          ]
+        },
+        {
+          "type": "Column",
+          "$when": "${$host.widgetSize != \"small\"}",
+          "width": 24,
+          "spacing": "Small",
+          "verticalContentAlignment": "Center",
+          "items": [
+            { "type": "TextBlock", "text": "${reset}", "size": "Small", "isSubtle": true, "horizontalAlignment": "Right", "maxLines": 1 }
           ]
         }
       ]
     },
     {
-      "type": "Container",
+      "type": "TextBlock",
+      "$when": "${$host.widgetSize != \"small\" && costs != ''}",
+      "text": "${costs}",
+      "size": "Small",
+      "isSubtle": true,
+      "wrap": true,
+      "spacing": "Medium"
+    },
+    {
+      "type": "ColumnSet",
       "$when": "${$host.widgetSize != \"small\"}",
-      "items": [
+      "spacing": "Medium",
+      "columns": [
         {
-          "type": "TextBlock",
-          "$when": "${!hasRows}",
-          "text": "${empty}",
-          "isSubtle": true,
-          "wrap": true
-        },
-        {
-          "type": "Container",
-          "$data": "${rows}",
-          "spacing": "Medium",
+          "type": "Column",
+          "width": "stretch",
+          "verticalContentAlignment": "Center",
           "items": [
-            {
-              "type": "ColumnSet",
-              "columns": [
-                {
-                  "type": "Column",
-                  "width": "stretch",
-                  "verticalContentAlignment": "Bottom",
-                  "items": [
-                    { "type": "TextBlock", "text": "${name}", "weight": "Bolder" }
-                  ]
-                },
-                {
-                  "type": "Column",
-                  "width": "auto",
-                  "verticalContentAlignment": "Bottom",
-                  "items": [
-                    { "type": "TextBlock", "text": "${pct}", "weight": "Bolder", "color": "${color}" }
-                  ]
-                }
-              ]
-            },
-            {
-              "type": "ColumnSet",
-              "spacing": "Small",
-              "columns": [
-                { "type": "Column", "width": "${used}", "style": "${barStyle}", "minHeight": "4px", "items": [] },
-                { "type": "Column", "width": "${rest}", "style": "emphasis", "minHeight": "4px", "spacing": "None", "items": [] }
-              ]
-            },
-            {
-              "type": "TextBlock",
-              "text": "${detail}",
-              "size": "Small",
-              "isSubtle": true,
-              "spacing": "Small",
-              "wrap": true
-            },
-            {
-              "type": "TextBlock",
-              "$when": "${cost != ''}",
-              "text": "${cost}",
-              "size": "Small",
-              "isSubtle": true,
-              "spacing": "None"
-            }
+            { "type": "TextBlock", "text": "${updated}", "size": "Small", "isSubtle": true }
           ]
         },
         {
-          "type": "ColumnSet",
-          "spacing": "Medium",
-          "columns": [
+          "type": "Column",
+          "width": "auto",
+          "items": [
             {
-              "type": "Column",
-              "width": "stretch",
-              "verticalContentAlignment": "Center",
-              "items": [
-                { "type": "TextBlock", "text": "${updated}", "size": "Small", "isSubtle": true }
-              ]
-            },
-            {
-              "type": "Column",
-              "width": "auto",
-              "items": [
-                {
-                  "type": "ActionSet",
-                  "actions": [
-                    { "type": "Action.Execute", "title": "${refresh}", "verb": "refresh" },
-                    { "type": "Action.Execute", "title": "${open}", "verb": "open" }
-                  ]
-                }
+              "type": "ActionSet",
+              "actions": [
+                { "type": "Action.Execute", "title": "${refresh}", "verb": "refresh" },
+                { "type": "Action.Execute", "title": "${open}", "verb": "open" }
               ]
             }
           ]

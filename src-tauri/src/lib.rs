@@ -397,7 +397,14 @@ const WINDOW_MAX_HEIGHT: f64 = 650.0;
 /// Resizes the popup to fit its content (logical px) and keeps it anchored above the tray.
 #[tauri::command]
 fn set_content_height(window: tauri::WebviewWindow, height: f64) {
+    // A Start menu launch shows the popup once the UI has laid itself out.
+    let show_now = SHOW_WHEN_READY.swap(false, Ordering::Relaxed);
     let height = height.clamp(120.0, WINDOW_MAX_HEIGHT).ceil();
+    if show_now {
+        let _ = window.set_size(tauri::LogicalSize::new(WINDOW_WIDTH, height));
+        show_popup_window(&window);
+        return;
+    }
     let scale = window.scale_factor().unwrap_or(1.0);
     if let Ok(current) = window.inner_size() {
         if (current.height as f64 - height * scale).abs() < 1.0 {
@@ -424,26 +431,136 @@ fn toggle_window(window: &tauri::WebviewWindow) {
     if window.is_visible().unwrap_or(false) {
         let _ = window.hide();
     } else {
-        position_window_above_tray(window);
-        let _ = window.show();
-        let _ = window.set_focus();
+        show_popup_window(window);
     }
+}
+
+fn show_popup_window(window: &tauri::WebviewWindow) {
+    position_window_above_tray(window);
+    let _ = window.show();
+    // Windows applies the launcher's STARTUPINFO show mode (which may be "hidden") to a
+    // process's first ShowWindow call instead of ours, so retry once if it didn't take.
+    // tao tracks visibility itself, so check and show through Win32 directly.
+    #[cfg(windows)]
+    if let Ok(hwnd) = window.hwnd() {
+        use windows_sys::Win32::UI::WindowsAndMessaging::{IsWindowVisible, ShowWindow, SW_SHOW};
+        let hwnd = hwnd.0 as _;
+        // SAFETY: `hwnd` is this window's live handle.
+        unsafe {
+            if IsWindowVisible(hwnd) == 0 {
+                ShowWindow(hwnd, SW_SHOW);
+            }
+        }
+    }
+    let _ = window.set_focus();
+}
+
+/// Shows the tray popup from any thread (widget "Open" button, a second launch).
+fn show_popup(app: &tauri::AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        let w = window.clone();
+        let _ = window.run_on_main_thread(move || show_popup_window(&w));
+    }
+}
+
+// ── Launch handling ───────────────────────────────────────────────────────────
+
+/// Set on an interactive launch: the popup opens when the UI first reports its height
+/// (showing it earlier, while the WebView loads, loses focus and hides it again).
+static SHOW_WHEN_READY: AtomicBool = AtomicBool::new(false);
+
+/// Passed by the HKCU Run entry (unpackaged builds) so a sign-in launch stays in the tray.
+const AUTOSTART_ARG: &str = "--autostart";
+/// Passed by the manifest's `com:ExeServer` when Windows starts the app for the widget.
+const COM_SERVER_ARG: &str = "-RegisterProcessAsComServer";
+
+/// Whether the user opened the app (Start menu, shortcut): those launches show the
+/// popup. Windows starting it at sign-in or for the widget keeps it in the tray.
+fn is_interactive_launch() -> bool {
+    if std::env::args()
+        .skip(1)
+        .any(|a| a == AUTOSTART_ARG || a == COM_SERVER_ARG)
+    {
+        return false;
+    }
+    #[cfg(windows)]
+    if is_packaged() {
+        use windows::ApplicationModel::{Activation::ActivationKind, AppInstance};
+        if let Ok(kind) = AppInstance::GetActivatedEventArgs().and_then(|args| args.Kind()) {
+            return kind != ActivationKind::StartupTask;
+        }
+    }
+    true
+}
+
+/// Named event a second launch sets to make the running instance show its popup.
+#[cfg(windows)]
+fn show_popup_event_name() -> Vec<u16> {
+    "Local\\WinAIUsageShowPopup"
+        .encode_utf16()
+        .chain(std::iter::once(0))
+        .collect()
+}
+
+/// Asks the already-running instance to show its popup.
+#[cfg(windows)]
+fn signal_running_instance() {
+    use windows_sys::Win32::Foundation::CloseHandle;
+    use windows_sys::Win32::System::Threading::{OpenEventW, SetEvent, EVENT_MODIFY_STATE};
+
+    let name = show_popup_event_name();
+    // SAFETY: plain Win32 calls on a handle this function owns and closes.
+    unsafe {
+        let event = OpenEventW(EVENT_MODIFY_STATE, 0, name.as_ptr());
+        if !event.is_null() {
+            SetEvent(event);
+            CloseHandle(event);
+        }
+    }
+}
+
+/// Shows the popup each time a second launch sets the named event.
+#[cfg(windows)]
+fn listen_for_launches(app: tauri::AppHandle) {
+    use windows_sys::Win32::System::Threading::{CreateEventW, WaitForSingleObject, INFINITE};
+
+    let name = show_popup_event_name();
+    // SAFETY: auto-reset event kept open for the life of the process.
+    let event = unsafe { CreateEventW(std::ptr::null(), 0, 0, name.as_ptr()) };
+    if event.is_null() {
+        return;
+    }
+    let event = event as usize; // HANDLE isn't Send; the event outlives the thread.
+    std::thread::spawn(move || loop {
+        // SAFETY: `event` stays valid; it is never closed.
+        if unsafe { WaitForSingleObject(event as _, INFINITE) } != 0 {
+            return;
+        }
+        show_popup(&app);
+    });
 }
 
 // ── App entry point ───────────────────────────────────────────────────────────
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let interactive = is_interactive_launch();
     let _single_instance = match acquire_single_instance() {
         Some(guard) => guard,
-        None => return,
+        None => {
+            #[cfg(windows)]
+            if interactive {
+                signal_running_instance();
+            }
+            return;
+        }
     };
 
     tauri::Builder::default()
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
-            Some(vec![]),
+            Some(vec![AUTOSTART_ARG]),
         ))
         .manage(UsageState(Arc::new(Mutex::new(None))))
         .manage(AlertedSet(Arc::new(Mutex::new(HashSet::new()))))
@@ -461,7 +578,7 @@ pub fn run() {
             settings::get_settings,
             settings::save_settings
         ])
-        .setup(|app| {
+        .setup(move |app| {
             let locale = sys_locale::get_locale().unwrap_or_else(|| "en-US".to_string());
             LANG_ES.store(locale.starts_with("es"), Ordering::Relaxed);
             show_first_run_tray_notice(app.handle());
@@ -487,16 +604,7 @@ pub fn run() {
                             refresh_and_broadcast(&app).await;
                         });
                     },
-                    move || {
-                        if let Some(window) = open_app.get_webview_window("main") {
-                            let w = window.clone();
-                            let _ = window.run_on_main_thread(move || {
-                                position_window_above_tray(&w);
-                                let _ = w.show();
-                                let _ = w.set_focus();
-                            });
-                        }
-                    },
+                    move || show_popup(&open_app),
                 );
             }
 
@@ -558,6 +666,21 @@ pub fn run() {
                     }
                 }
             });
+
+            // ── Start menu / shortcut launches open the popup ─────────────────
+            #[cfg(windows)]
+            listen_for_launches(app.handle().clone());
+            if interactive {
+                SHOW_WHEN_READY.store(true, Ordering::Relaxed);
+                // Fallback in case the UI never reports its height.
+                let app = app.handle().clone();
+                std::thread::spawn(move || {
+                    std::thread::sleep(Duration::from_secs(3));
+                    if SHOW_WHEN_READY.swap(false, Ordering::Relaxed) {
+                        show_popup(&app);
+                    }
+                });
+            }
 
             Ok(())
         })

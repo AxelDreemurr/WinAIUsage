@@ -7,7 +7,8 @@
   2. Lays out the package: exe under VFS\ProgramFilesX64\WinAIUsage, logos generated
      from src-tauri\icons\icon.png into Assets\ (scale and targetsize variants, plus the
      widget picker's WidgetIcon.png / WidgetScreenshot.png).
-  3. Copies packaging\AppxManifest.xml with Version taken from tauri.conf.json (x.y.z.0).
+  3. Copies packaging\AppxManifest.xml with Version taken from tauri.conf.json (x.y.z.0),
+     and packaging\Strings\<lang>\Resources.resw for its ms-resource: strings.
   4. Runs makepri + makeappx from the Windows SDK.
 
   packaging\AppxManifest.xml is NOT versioned (it holds the Store identity). Create it
@@ -89,6 +90,9 @@ $manifestText = [IO.File]::ReadAllText($manifestSrc)
 $manifestText = [regex]::Replace($manifestText, '(<Identity\b[^>]*?\bVersion=")[^"]*(")', "`${1}$msixVersion`${2}")
 $manifestDst = Join-Path $layout 'AppxManifest.xml'
 [IO.File]::WriteAllText($manifestDst, $manifestText, (New-Object Text.UTF8Encoding $false))
+
+# Localized manifest strings (ms-resource:...), indexed into resources.pri below.
+Copy-Item (Join-Path $root 'packaging\Strings') (Join-Path $layout 'Strings') -Recurse
 
 $exeRel = ([xml]$manifestText).Package.Applications.Application.Executable
 $exeDst = Join-Path $layout $exeRel
