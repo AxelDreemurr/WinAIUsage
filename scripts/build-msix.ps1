@@ -5,7 +5,8 @@
 .DESCRIPTION
   1. Builds the release exe with `tauri build --no-bundle` (skip with -SkipBuild).
   2. Lays out the package: exe under VFS\ProgramFilesX64\WinAIUsage, logos generated
-     from src-tauri\icons\icon.png into Assets\ (scale and targetsize variants).
+     from src-tauri\icons\icon.png into Assets\ (scale and targetsize variants, plus the
+     widget picker's WidgetIcon.png / WidgetScreenshot.png).
   3. Copies packaging\AppxManifest.xml with Version taken from tauri.conf.json (x.y.z.0).
   4. Runs makepri + makeappx from the Windows SDK.
 
@@ -135,6 +136,9 @@ try {
             Save-Logo "$($logo.Name).scale-$scale.png" $w $h $logo.Fill
         }
     }
+    # Widget picker icon and preview (manifest: com.microsoft.windows.widgets).
+    Save-Logo 'WidgetIcon.png' 64 64 1.0
+    Save-Logo 'WidgetScreenshot.png' 300 304 0.5
     # Taskbar / Start / Explorer icons.
     foreach ($t in 16, 24, 32, 48, 256) {
         Save-Logo "Square44x44Logo.targetsize-$t.png" $t $t 1.0

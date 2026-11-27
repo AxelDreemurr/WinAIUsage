@@ -77,27 +77,50 @@ pub fn read_token(
     select_token(v2.as_ref(), v1.as_ref(), organization, account, now_ms)
 }
 
-/// Desktop's data folder. The Microsoft Store (MSIX) build writes `%APPDATA%\Claude`
-/// virtualized into its package folder, visible at the real path only from inside
-/// that package, so other apps must look under `%LOCALAPPDATA%\Packages` too.
+/// Desktop's data folder. Newer Desktop builds keep it in
+/// `%LOCALAPPDATA%\Claude-Data\claude_<publisher id>` (moved there on launch, leaving the
+/// old folder empty). Older ones used `%APPDATA%\Claude`, which the Microsoft Store (MSIX)
+/// build writes virtualized into `%LOCALAPPDATA%\Packages\Claude_*\LocalCache\Roaming`.
+/// When several hold a `config.json`, the most recently written one is the live login.
 fn find_desktop_dir() -> Option<PathBuf> {
+    let subdirs = |parent: PathBuf, prefix: &'static str| {
+        std::fs::read_dir(parent)
+            .into_iter()
+            .flatten()
+            .filter_map(|e| e.ok())
+            .filter(move |e| {
+                e.file_name()
+                    .to_string_lossy()
+                    .to_ascii_lowercase()
+                    .starts_with(prefix)
+            })
+            .map(|e| e.path())
+    };
+
     let mut candidates = Vec::new();
+    if let Ok(local) = std::env::var("LOCALAPPDATA") {
+        let local = PathBuf::from(local);
+        candidates.extend(subdirs(local.join("Claude-Data"), "claude_"));
+        candidates.extend(
+            subdirs(local.join("Packages"), "claude_")
+                .map(|p| p.join("LocalCache").join("Roaming").join("Claude")),
+        );
+    }
     if let Ok(appdata) = std::env::var("APPDATA") {
         candidates.push(PathBuf::from(appdata).join("Claude"));
     }
-    if let Ok(local) = std::env::var("LOCALAPPDATA") {
-        if let Ok(packages) = std::fs::read_dir(PathBuf::from(local).join("Packages")) {
-            candidates.extend(
-                packages
-                    .filter_map(|e| e.ok())
-                    .filter(|e| e.file_name().to_string_lossy().starts_with("Claude_"))
-                    .map(|e| e.path().join("LocalCache").join("Roaming").join("Claude")),
-            );
-        }
-    }
     candidates
         .into_iter()
-        .find(|dir| dir.join("config.json").is_file())
+        .filter_map(|dir| {
+            let modified = std::fs::metadata(dir.join("config.json"))
+                .ok()
+                .filter(|m| m.is_file())?
+                .modified()
+                .ok()?;
+            Some((modified, dir))
+        })
+        .max_by_key(|(modified, _)| *modified)
+        .map(|(_, dir)| dir)
 }
 
 // ── Decryption ────────────────────────────────────────────────────────────────

@@ -1,6 +1,8 @@
 mod pricing;
 mod providers;
 pub mod settings;
+#[cfg(windows)]
+mod widget;
 
 use std::collections::HashSet;
 use std::fs;
@@ -126,21 +128,22 @@ async fn get_all_usage_data(state: tauri::State<'_, UsageState>) -> Result<AllUs
 }
 
 #[tauri::command]
-async fn refresh_now(
-    app_handle: tauri::AppHandle,
-    state: tauri::State<'_, UsageState>,
-) -> Result<(), ()> {
-    let payload = fetch_all().await;
-    {
-        let mut g = state.0.lock().unwrap();
-        *g = Some(payload.clone());
-    }
-    check_and_notify(&app_handle, &payload);
-    let _ = app_handle.emit("usage-updated", payload);
+async fn refresh_now(app_handle: tauri::AppHandle) -> Result<(), ()> {
+    refresh_and_broadcast(&app_handle).await;
     Ok(())
 }
 
 // ── Fetch helper ──────────────────────────────────────────────────────────────
+
+/// Fetches every provider and hands the result to the popup, alerts and widgets.
+async fn refresh_and_broadcast(app: &tauri::AppHandle) {
+    let payload = fetch_all().await;
+    *app.state::<UsageState>().0.lock().unwrap() = Some(payload.clone());
+    check_and_notify(app, &payload);
+    #[cfg(windows)]
+    widget::publish(&payload);
+    let _ = app.emit("usage-updated", payload);
+}
 
 async fn fetch_all() -> AllUsageData {
     let settings = settings::read_settings();
@@ -465,20 +468,37 @@ pub fn run() {
 
             // ── Background polling ────────────────────────────────────────────
             let poll_app = app.handle().clone();
-            let poll_state = app.state::<UsageState>().0.clone();
-
             tauri::async_runtime::spawn(async move {
                 loop {
-                    let payload = fetch_all().await;
-                    {
-                        let mut g = poll_state.lock().unwrap();
-                        *g = Some(payload.clone());
-                    }
-                    check_and_notify(&poll_app, &payload);
-                    let _ = poll_app.emit("usage-updated", payload);
+                    refresh_and_broadcast(&poll_app).await;
                     tokio::time::sleep(Duration::from_secs(300)).await;
                 }
             });
+
+            // ── Windows 11 widget (Widgets board / lock screen) ───────────────
+            #[cfg(windows)]
+            {
+                let refresh_app = app.handle().clone();
+                let open_app = app.handle().clone();
+                widget::start(
+                    move || {
+                        let app = refresh_app.clone();
+                        tauri::async_runtime::spawn(async move {
+                            refresh_and_broadcast(&app).await;
+                        });
+                    },
+                    move || {
+                        if let Some(window) = open_app.get_webview_window("main") {
+                            let w = window.clone();
+                            let _ = window.run_on_main_thread(move || {
+                                position_window_above_tray(&w);
+                                let _ = w.show();
+                                let _ = w.set_focus();
+                            });
+                        }
+                    },
+                );
+            }
 
             // ── Tray setup ────────────────────────────────────────────────────
             let focus_lost_at: Arc<Mutex<Option<Instant>>> = Arc::new(Mutex::new(None));
